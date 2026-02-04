@@ -4,6 +4,7 @@ members = [
     "sword",
     "sword-common",
     "sword-ebpf",
+    "rust-mouse",
 ]
 default-members = ["sword", "sword-common"]
 
