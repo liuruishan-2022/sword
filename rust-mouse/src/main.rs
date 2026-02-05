@@ -7,4 +7,5 @@ pub mod cpu;
 async fn main() {
     fmt().init();
     tracing::info!("start rust mouse...");
+    cpu::sched_search().await;
 }
