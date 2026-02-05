@@ -1,5 +1,6 @@
 use moka::future::Cache;
 use rand::Rng;
+use rand::SeedableRng;
 use std::time::Duration;
 
 /// 手机号和区域ID的数据结构
@@ -62,7 +63,7 @@ pub async fn mock_cache(
     count: usize,
 ) -> Cache<String, PhoneRegion> {
     let cache = create_cache(capacity, ttl);
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rngs::StdRng::from_entropy();
 
     for _ in 0..count {
         // 生成随机长度的手机号 (7-9位)
