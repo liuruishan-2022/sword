@@ -1,21 +1,7 @@
 #![no_std]
 #![no_main]
 
-use aya_ebpf::{macros::tracepoint, programs::TracePointContext};
-use aya_log_ebpf::info;
-
-#[tracepoint]
-pub fn sword(ctx: TracePointContext) -> u32 {
-    match try_sword(ctx) {
-        Ok(ret) => ret,
-        Err(ret) => ret,
-    }
-}
-
-fn try_sword(ctx: TracePointContext) -> Result<u32, u32> {
-    info!(&ctx, "tracepoint sys_enter_open called");
-    Ok(0)
-}
+pub mod cpu;
 
 #[cfg(not(test))]
 #[panic_handler]

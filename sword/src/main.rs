@@ -43,9 +43,9 @@ async fn main() -> anyhow::Result<()> {
             });
         }
     }
-    let program: &mut TracePoint = ebpf.program_mut("sword").unwrap().try_into()?;
+    let program: &mut TracePoint = ebpf.program_mut("sched_switch").unwrap().try_into()?;
     program.load()?;
-    program.attach("syscalls", "sys_enter_open")?;
+    program.attach("sched", "sched_switch")?;
 
     let ctrl_c = signal::ctrl_c();
     println!("Waiting for Ctrl-C...");
