@@ -1,3 +1,5 @@
+use core::str;
+
 ///
 /// 放置cpu调度相关的处理代码逻辑
 ///
@@ -7,7 +9,7 @@ use aya_ebpf::{
 use aya_log_ebpf::{info, warn};
 
 static mut count: u64 = 0;
-const TARGET_PID: u32 = 677824;
+const TARGET_PID: u32 = 899458;
 
 #[tracepoint]
 pub fn sched_switch(ctx: TracePointContext) -> u32 {
@@ -71,11 +73,17 @@ fn try_sched_switch(ctx: TracePointContext) -> Result<u32, u32> {
 
 fn handle_trace_point_context(ctx: &TracePointContext) {
     unsafe {
-        let common_type = ctx.read_at::<u16>(0);
-        if let Ok(common_type) = common_type {
-            info!(ctx, "common_type: {}", common_type);
-        } else {
-            warn!(ctx, "read common_type failed");
+        let prev_comm = ctx.read_at::<[u8; 16]>(8);
+        if let Ok(prev_comm) = prev_comm {
+            let mut len = 0;
+            for i in 0..16 {
+                if prev_comm[i] == 0 {
+                    break;
+                }
+                len = i + 1;
+            }
+            let comm_str = str::from_utf8_unchecked(&prev_comm[..len]);
+            info!(&ctx, "prev_comm: {}", comm_str);
         }
     }
 }
