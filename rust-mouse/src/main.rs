@@ -1,5 +1,6 @@
 use tracing_subscriber::fmt;
 
+pub mod common;
 pub mod cpu;
 
 #[tokio::main]
