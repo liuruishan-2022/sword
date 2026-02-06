@@ -6,10 +6,10 @@ use core::str;
 use aya_ebpf::{
     helpers::bpf_get_current_pid_tgid, macros::tracepoint, programs::TracePointContext,
 };
-use aya_log_ebpf::info;
+use aya_log_ebpf::{info, warn};
 
 static mut count: u64 = 0;
-const TARGET_PID: u32 = 899461;
+const TARGET_PID: u32 = 936909;
 
 #[tracepoint]
 pub fn sched_switch(ctx: TracePointContext) -> u32 {
@@ -56,6 +56,13 @@ pub fn sched_switch(ctx: TracePointContext) -> u32 {
 /// 	field:char next_comm[16];	offset:40;	size:16;	signed:0;
 /// 	field:pid_t next_pid;	offset:56;	size:4;	signed:1;
 /// 	field:int next_prio;	offset:60;	size:4;	signed:1;
+///
+/// 字段解析:
+/// prev_comm: 上一个进程的名字,
+/// prev_pid:上一个进程的id,
+/// prev_prio: 上一个进程的优先级,一般是120这个中间值
+/// prev_state: 上一个进程的状态
+/// 同理next也是这样子
 
 fn try_sched_switch(ctx: TracePointContext) -> Result<u32, u32> {
     let thread_id = bpf_get_current_pid_tgid() as u32;
@@ -87,5 +94,135 @@ fn handle_trace_point_context(ctx: &TracePointContext) {
             let comm_str = str::from_utf8_unchecked(&prev_comm[..len]);
             info!(&ctx, "prev_comm: {}", comm_str);
         }
+        let prev_pid = ctx.read_at::<i32>(24);
+        match prev_pid {
+            Ok(prev_pid) => {
+                info!(&ctx, "prev_pid: {}", prev_pid);
+            }
+            Err(_) => {
+                info!(&ctx, "获取prev_pid错误");
+            }
+        }
+        let prev_prio = ctx.read_at::<u32>(28);
+        match prev_prio {
+            Ok(prev_prio) => {
+                info!(&ctx, "prev_prio: {}", prev_prio);
+            }
+            Err(_) => {
+                info!(&ctx, "获取prev_prio错误");
+            }
+        }
+        let prev_state = ctx.read_at::<u64>(32);
+        match prev_state {
+            Ok(prev_state) => {
+                info!(&ctx, "prev_state: {}", prev_state);
+            }
+            Err(_) => {
+                info!(&ctx, "获取prev_state错误");
+            }
+        }
+        let next_comm = ctx.read_at::<[u8; 16]>(40);
+        if let Ok(next_comm) = next_comm {
+            let mut len = 0;
+            for i in 0..16 {
+                if next_comm[i] == 0 {
+                    len = i;
+                    break;
+                }
+            }
+            info!(
+                &ctx,
+                "next_comm: {}",
+                str::from_utf8_unchecked(&next_comm[..len])
+            );
+        }
+
+        let prev_pid = ctx.read_at::<u32>(56);
+        match prev_pid {
+            Ok(prev_pid) => {
+                info!(&ctx, "next_pid: {}", prev_pid);
+            }
+            Err(_) => {
+                info!(&ctx, "获取next_pid错误");
+            }
+        }
+        let next_prio = ctx.read_at::<u32>(60);
+        match next_prio {
+            Ok(next_prio) => {
+                info!(&ctx, "next_prio: {}", next_prio);
+            }
+            Err(_) => {
+                info!(&ctx, "获取next_prio错误");
+            }
+        }
     }
+}
+
+///
+/// 继续跟踪: sched_wakeup这个tracepoint
+/// name: sched_wakeup
+/// ID: 332
+/// format:
+/// 	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+/// 	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+/// 	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+/// 	field:int common_pid;	offset:4;	size:4;	signed:1;
+///
+/// 	field:char comm[16];	offset:8;	size:16;	signed:0;
+/// 	field:pid_t pid;	offset:24;	size:4;	signed:1;
+/// 	field:int prio;	offset:28;	size:4;	signed:1;
+/// 	field:int target_cpu;	offset:32;	size:4;	signed:1;
+///
+
+#[tracepoint]
+pub fn sched_wakeup(ctx: TracePointContext) -> u32 {
+    match try_sched_wakeup(ctx) {
+        Ok(ret) => ret,
+        Err(ret) => ret,
+    }
+}
+
+fn try_sched_wakeup(ctx: TracePointContext) -> Result<u32, u32> {
+    unsafe {
+        let comm = ctx.read_at::<[u8; 16]>(8);
+        if let Ok(comm) = comm {
+            let mut len = 0;
+            for i in 0..16 {
+                if comm[i] == 0 {
+                    break;
+                }
+                len = i + 1;
+            }
+            let comm_str = str::from_utf8_unchecked(&comm[..len]);
+            info!(&ctx, "sched_wakeup comm: {}", comm_str);
+        }
+        let pid = ctx.read_at::<i32>(24);
+        match pid {
+            Ok(pid) => {
+                info!(&ctx, "sched_wakeup pid: {}", pid);
+            }
+            Err(e) => {
+                warn!(&ctx, "sched_wakeup error: {}", e);
+            }
+        }
+        let prio = ctx.read_at::<i32>(28);
+        match prio {
+            Ok(prio) => {
+                info!(&ctx, "sched_wakeup prio: {}", prio);
+            }
+            Err(e) => {
+                warn!(&ctx, "sched_wakeup error: {}", e);
+            }
+        }
+        let target_cpu = ctx.read_at::<i32>(32);
+        match target_cpu {
+            Ok(target_cpu) => {
+                info!(&ctx, "sched_wakeup target_cpu: {}", target_cpu);
+            }
+            Err(e) => {
+                warn!(&ctx, "sched_wakeup error: {}", e);
+            }
+        }
+    }
+    Ok(0)
 }

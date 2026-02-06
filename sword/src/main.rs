@@ -1,7 +1,8 @@
-use aya::programs::TracePoint;
 #[rustfmt::skip]
 use log::{debug, warn};
 use tokio::signal;
+
+pub mod loader;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -43,9 +44,8 @@ async fn main() -> anyhow::Result<()> {
             });
         }
     }
-    let program: &mut TracePoint = ebpf.program_mut("sched_switch").unwrap().try_into()?;
-    program.load()?;
-    program.attach("sched", "sched_switch")?;
+
+    loader::load_tracepoint(&mut ebpf)?;
 
     let ctrl_c = signal::ctrl_c();
     println!("Waiting for Ctrl-C...");
