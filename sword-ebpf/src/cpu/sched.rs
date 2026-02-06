@@ -226,3 +226,203 @@ fn try_sched_wakeup(ctx: TracePointContext) -> Result<u32, u32> {
     }
     Ok(0)
 }
+
+///
+/// 继续跟踪: sched_wakeup_new这个tracepoint
+/// name: sched_wakeup_new
+/// ID: 331
+/// format:
+/// 	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+/// 	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+/// 	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+/// 	field:int common_pid;	offset:4;	size:4;	signed:1;
+///
+/// 	field:char comm[16];	offset:8;	size:16;	signed:0;
+/// 	field:pid_t pid;	offset:24;	size:4;	signed:1;
+/// 	field:int prio;	offset:28;	size:4;	signed:1;
+/// 	field:int target_cpu;	offset:32;	size:4;	signed:1;
+///
+
+
+#[tracepoint]
+pub fn sched_wakeup_new(ctx: TracePointContext) -> u32 {
+    match try_sched_wakeup_new(ctx) {
+        Ok(ret) => ret,
+        Err(ret) => ret,
+    }
+}
+
+fn try_sched_wakeup_new(ctx: TracePointContext) -> Result<u32, u32> {
+    unsafe {
+        let comm = ctx.read_at::<[u8; 16]>(8);
+        if let Ok(comm) = comm {
+            let mut len = 0;
+            for i in 0..16 {
+                if comm[i] == 0 {
+                    break;
+                }
+                len = i + 1;
+            }
+            let comm_str = str::from_utf8_unchecked(&comm[..len]);
+            info!(&ctx, "sched_wakeup_new comm: {}", comm_str);
+        }
+        let pid = ctx.read_at::<i32>(24);
+        match pid {
+            Ok(pid) => {
+                info!(&ctx, "sched_wakeup_new pid: {}", pid);
+            }
+            Err(e) => {
+                warn!(&ctx, "sched_wakeup_new error: {}", e);
+            }
+        }
+        let prio = ctx.read_at::<i32>(28);
+        match prio {
+            Ok(prio) => {
+                info!(&ctx, "sched_wakeup_new prio: {}", prio);
+            }
+            Err(e) => {
+                warn!(&ctx, "sched_wakeup_new error: {}", e);
+            }
+        }
+        let target_cpu = ctx.read_at::<i32>(32);
+        match target_cpu {
+            Ok(target_cpu) => {
+                info!(&ctx, "sched_wakeup_new target_cpu: {}", target_cpu);
+            }
+            Err(e) => {
+                warn!(&ctx, "sched_wakeup_new error: {}", e);
+            }
+        }
+    }
+    Ok(0)
+}
+
+///
+/// 继续跟踪: sched_waking这个tracepoint
+/// name: sched_waking
+/// ID: 333
+/// format:
+/// 	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+/// 	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+/// 	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+/// 	field:int common_pid;	offset:4;	size:4;	signed:1;
+///
+/// 	field:char comm[16];	offset:8;	size:16;	signed:0;
+/// 	field:pid_t pid;	offset:24;	size:4;	signed:1;
+/// 	field:int prio;	offset:28;	size:4;	signed:1;
+/// 	field:int target_cpu;	offset:32;	size:4;	signed:1;
+///
+
+
+#[tracepoint]
+pub fn sched_waking(ctx: TracePointContext) -> u32 {
+    match try_sched_waking(ctx) {
+        Ok(ret) => ret,
+        Err(ret) => ret,
+    }
+}
+
+fn try_sched_waking(ctx: TracePointContext) -> Result<u32, u32> {
+    unsafe {
+        let comm = ctx.read_at::<[u8; 16]>(8);
+        if let Ok(comm) = comm {
+            let mut len = 0;
+            for i in 0..16 {
+                if comm[i] == 0 {
+                    break;
+                }
+                len = i + 1;
+            }
+            let comm_str = str::from_utf8_unchecked(&comm[..len]);
+            info!(&ctx, "sched_waking comm: {}", comm_str);
+        }
+        let pid = ctx.read_at::<i32>(24);
+        match pid {
+            Ok(pid) => {
+                info!(&ctx, "sched_waking pid: {}", pid);
+            }
+            Err(e) => {
+                warn!(&ctx, "sched_waking error: {}", e);
+            }
+        }
+        let prio = ctx.read_at::<i32>(28);
+        match prio {
+            Ok(prio) => {
+                info!(&ctx, "sched_waking prio: {}", prio);
+            }
+            Err(e) => {
+                warn!(&ctx, "sched_waking error: {}", e);
+            }
+        }
+        let target_cpu = ctx.read_at::<i32>(32);
+        match target_cpu {
+            Ok(target_cpu) => {
+                info!(&ctx, "sched_waking target_cpu: {}", target_cpu);
+            }
+            Err(e) => {
+                warn!(&ctx, "sched_waking error: {}", e);
+            }
+        }
+    }
+    Ok(0)
+}
+
+///
+/// 继续跟踪: sched_wait_task这个tracepoint
+/// name: sched_wait_task
+/// ID: 326
+/// format:
+/// 	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+/// 	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+/// 	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+/// 	field:int common_pid;	offset:4;	size:4;	signed:1;
+///
+/// 	field:char comm[16];	offset:8;	size:16;	signed:0;
+/// 	field:pid_t pid;	offset:24;	size:4;	signed:1;
+/// 	field:int prio;	offset:28;	size:4;	signed:1;
+///
+
+
+#[tracepoint]
+pub fn sched_wait_task(ctx: TracePointContext) -> u32 {
+    match try_sched_wait_task(ctx) {
+        Ok(ret) => ret,
+        Err(ret) => ret,
+    }
+}
+
+fn try_sched_wait_task(ctx: TracePointContext) -> Result<u32, u32> {
+    unsafe {
+        let comm = ctx.read_at::<[u8; 16]>(8);
+        if let Ok(comm) = comm {
+            let mut len = 0;
+            for i in 0..16 {
+                if comm[i] == 0 {
+                    break;
+                }
+                len = i + 1;
+            }
+            let comm_str = str::from_utf8_unchecked(&comm[..len]);
+            info!(&ctx, "sched_wait_task comm: {}", comm_str);
+        }
+        let pid = ctx.read_at::<i32>(24);
+        match pid {
+            Ok(pid) => {
+                info!(&ctx, "sched_wait_task pid: {}", pid);
+            }
+            Err(e) => {
+                warn!(&ctx, "sched_wait_task error: {}", e);
+            }
+        }
+        let prio = ctx.read_at::<i32>(28);
+        match prio {
+            Ok(prio) => {
+                info!(&ctx, "sched_wait_task prio: {}", prio);
+            }
+            Err(e) => {
+                warn!(&ctx, "sched_wait_task error: {}", e);
+            }
+        }
+    }
+    Ok(0)
+}
