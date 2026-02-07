@@ -14,7 +14,10 @@ async fn main() {
         .init();
     info!("start rust mouse...");
 
-    cpu::sched_search().await;
+    //1. cpu相关的探索
+    //cpu::sched_search().await;
+    //2. 文件系统相关的探索
+    io::io_file();
     info!("search task started in background");
     tokio::signal::ctrl_c()
         .await
