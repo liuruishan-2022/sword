@@ -1,7 +1,9 @@
 #![no_std]
 #![no_main]
 
+pub mod common;
 pub mod cpu;
+pub mod io;
 
 #[cfg(not(test))]
 #[panic_handler]
