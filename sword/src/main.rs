@@ -45,7 +45,7 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
-    loader::load_tracepoint(&mut ebpf)?;
+    loader::load_ebpf(&mut ebpf)?;
 
     let ctrl_c = signal::ctrl_c();
     println!("Waiting for Ctrl-C...");
