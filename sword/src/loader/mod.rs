@@ -1,6 +1,8 @@
 pub mod cpu;
+pub mod io;
 
 pub fn load_tracepoint(ebpf: &mut aya::Ebpf) -> anyhow::Result<()> {
     cpu::load_sched(ebpf)?;
+    io::load_io(ebpf)?;
     Ok(())
 }
