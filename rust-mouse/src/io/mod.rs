@@ -1,6 +1,6 @@
 pub mod file;
 
 pub fn io_file() {
-    let path = "/media/data/code/github/linux";
+    let path = "/media/liuxu/data/code/github";
     file::line_count(path);
 }
