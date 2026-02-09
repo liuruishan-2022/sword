@@ -9,7 +9,6 @@ use aya_ebpf::{
     programs::TracePointContext,
 };
 use aya_log_ebpf::{info, warn};
-use core::str;
 
 const LOG_BUF_CAPACITY: usize = 1024;
 
@@ -24,8 +23,8 @@ pub static mut BUF: PerCpuArray<Buf> = PerCpuArray::with_max_entries(1, 0);
 #[tracepoint]
 pub fn sys_enter_open(ctx: TracePointContext) -> u32 {
     match try_sys_enter_open(ctx) {
-        Ok(ret) => ret,
-        Err(ret) => ret,
+        Ok(ret) => ret as u32,
+        Err(ret) => 1 as u32,
     }
 }
 
@@ -49,39 +48,13 @@ pub fn sys_enter_open(ctx: TracePointContext) -> u32 {
 fn try_sys_enter_open(ctx: TracePointContext) -> Result<c_long, c_long> {
     unsafe {
         // 读取 __syscall_nr
-        let syscall_nr = ctx.read_at::<u32>(8);
-        match syscall_nr {
-            Ok(nr) => info!(&ctx, "sys_enter_open syscall_nr: {}", nr),
-            Err(_) => warn!(&ctx, "read __syscall_nr error"),
-        }
+        let syscall_nr = ctx.read_at::<u32>(8)?;
+        info!(&ctx, "sys_enter_open syscall_nr: {}", syscall_nr);
 
-        let filename: u64 = ctx.read_at(16)?;
-        let ptr = {
-            let ptr = BUF.get_ptr_mut(0).ok_or(0)?;
-            &mut *ptr
-        };
-
-        let filename = {
-            let len = bpf_probe_read_user_str_bytes(filename as *const u8, &mut ptr.buf)?;
-            core::str::from_utf8_unchecked(len)
-        };
-
-        info!(&ctx, "filename: {}", filename);
-
-        // 读取 flags
         let flags = ctx.read_at::<u64>(24)?;
         info!(&ctx, "flags: {}", flags);
-
-        // 读取 mode
-        let mode = ctx.read_at::<u64>(32);
-        match mode {
-            Ok(m) => {
-                // 将 mode 转换为十进制和十六进制显示
-                let mode_val = m as u32;
-                info!(&ctx, "mode: {} (0x{:x})", mode_val, mode_val);
-            }
-            Err(_) => warn!(&ctx, "read mode error"),
-        }
+        let mode = ctx.read_at::<u64>(32)?;
+        info!(&ctx, "mode: {} (0x{:x})", mode, mode);
     }
     Ok(0)
 }
@@ -89,8 +62,8 @@ fn try_sys_enter_open(ctx: TracePointContext) -> Result<c_long, c_long> {
 #[tracepoint]
 pub fn sys_enter_openat(ctx: TracePointContext) -> u32 {
     match try_sys_enter_openat(ctx) {
-        Ok(ret) => ret,
-        Err(ret) => ret,
+        Ok(ret) => ret as u32,
+        Err(ret) => ret as u32,
     }
 }
 
@@ -122,33 +95,8 @@ fn try_sys_enter_openat(ctx: TracePointContext) -> Result<c_long, c_long> {
             Err(_) => warn!(&ctx, "read __syscall_nr error"),
         }
 
-        // 读取 dfd (目录文件描述符)
-        let dfd: u64 = ctx.read_at(16)?;
-        // AT_FDCWD 通常定义为 -100 (0xFFFFFFFFFFFFFF9C)
-        if dfd == 0xFFFFFFFFFFFFFF9C {
-            info!(&ctx, "dfd: AT_FDCWD (current working directory)");
-        } else {
-            info!(&ctx, "dfd: {}", dfd);
-        }
-
-        let filename: u64 = ctx.read_at(24)?;
-        let ptr = {
-            let ptr = BUF.get_ptr_mut(0).ok_or(0)?;
-            &mut *ptr
-        };
-
-        let filename = {
-            let len = bpf_probe_read_user_str_bytes(filename as *const u8, &mut ptr.buf)?;
-            core::str::from_utf8_unchecked(len)
-        };
-
-        info!(&ctx, "filename: {}", filename);
-
-        // 读取 flags
         let flags: u64 = ctx.read_at(32)?;
         info!(&ctx, "flags: {}", flags);
-
-        // 读取 mode
         let mode: u64 = ctx.read_at(40)?;
         let mode_val = mode as u32;
         info!(&ctx, "mode: {} (0x{:x})", mode_val, mode_val);
