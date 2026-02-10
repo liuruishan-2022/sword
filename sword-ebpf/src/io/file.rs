@@ -20,7 +20,7 @@ pub struct Buf {
 }
 
 #[map]
-pub static mut BUF: PerCpuArray<Buf> = PerCpuArray::with_max_entries(1, 0);
+pub static BUF: PerCpuArray<Buf> = PerCpuArray::with_max_entries(1, 0);
 
 #[tracepoint]
 pub fn sys_enter_open(ctx: TracePointContext) -> u32 {
@@ -100,14 +100,19 @@ fn try_sys_enter_openat(ctx: TracePointContext) -> Result<c_long, c_long> {
         info!(&ctx, "mode: {} (0x{:x})", mode_val, mode_val);
 
         //专门的读取filename这个信息,这个地方要注意,这个filename是一个指针,不是字符数组
-        let mut buf = [0u8; 256];
-        let filename = {
-            let filename_src_addr = ctx.read_at::<*const u8>(24)?;
-            let filename_bytes = bpf_probe_read_user_str_bytes(filename_src_addr, &mut buf)?;
-            from_utf8_unchecked(filename_bytes)
+
+        let filename_addr: u64 = ctx.read_at(24)?;
+        let buf = {
+            let ptr = BUF.get_ptr_mut(0).ok_or(0)?;
+            &mut *ptr
         };
 
-        info!(&ctx, "filename: {}", filename);
+        let filename = {
+            let len = bpf_probe_read_user_str_bytes(filename_addr as *const u8, &mut buf.buf)?;
+            core::str::from_utf8_unchecked(len)
+        };
+
+        info!(&ctx, "使用eBPF的Map获取到filename: {}", filename);
     }
     Ok(0)
 }
