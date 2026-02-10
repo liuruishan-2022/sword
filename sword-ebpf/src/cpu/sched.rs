@@ -8,7 +8,7 @@ use aya_ebpf::{
 };
 use aya_log_ebpf::{info, warn};
 
-static mut count: u64 = 0;
+static mut COUNT: u64 = 0;
 const TARGET_PID: u32 = 936909;
 
 #[tracepoint]
@@ -46,7 +46,7 @@ pub fn sched_switch(ctx: TracePointContext) -> u32 {
 /// format:
 /// 	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
 /// 	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
-/// 	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+/// 	field:unsigned char common_preempt_COUNT;	offset:3;	size:1;	signed:0;
 /// 	field:int common_pid;	offset:4;	size:4;	signed:1;
 
 /// 	field:char prev_comm[16];	offset:8;	size:16;	signed:0;
@@ -68,9 +68,9 @@ fn try_sched_switch(ctx: TracePointContext) -> Result<u32, u32> {
     let thread_id = bpf_get_current_pid_tgid() as u32;
     if thread_id == TARGET_PID {
         unsafe {
-            count = count + 1;
-            if count % 10 == 0 {
-                info!(&ctx, "count: {}", count);
+            COUNT = COUNT + 1;
+            if COUNT % 10 == 0 {
+                info!(&ctx, "COUNT: {}", COUNT);
                 handle_trace_point_context(&ctx);
             }
         }
@@ -165,7 +165,7 @@ fn handle_trace_point_context(ctx: &TracePointContext) {
 /// format:
 /// 	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
 /// 	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
-/// 	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+/// 	field:unsigned char common_preempt_COUNT;	offset:3;	size:1;	signed:0;
 /// 	field:int common_pid;	offset:4;	size:4;	signed:1;
 ///
 /// 	field:char comm[16];	offset:8;	size:16;	signed:0;
@@ -201,8 +201,8 @@ fn try_sched_wakeup(ctx: TracePointContext) -> Result<u32, u32> {
             Ok(pid) => {
                 info!(&ctx, "sched_wakeup pid: {}", pid);
             }
-            Err(e) => {
-                warn!(&ctx, "sched_wakeup error: {}", e);
+            Err(_) => {
+                warn!(&ctx, "sched_wakeup error reading pid");
             }
         }
         let prio = ctx.read_at::<i32>(28);
@@ -210,8 +210,8 @@ fn try_sched_wakeup(ctx: TracePointContext) -> Result<u32, u32> {
             Ok(prio) => {
                 info!(&ctx, "sched_wakeup prio: {}", prio);
             }
-            Err(e) => {
-                warn!(&ctx, "sched_wakeup error: {}", e);
+            Err(_) => {
+                warn!(&ctx, "sched_wakeup error reading prio");
             }
         }
         let target_cpu = ctx.read_at::<i32>(32);
@@ -219,8 +219,8 @@ fn try_sched_wakeup(ctx: TracePointContext) -> Result<u32, u32> {
             Ok(target_cpu) => {
                 info!(&ctx, "sched_wakeup target_cpu: {}", target_cpu);
             }
-            Err(e) => {
-                warn!(&ctx, "sched_wakeup error: {}", e);
+            Err(_) => {
+                warn!(&ctx, "sched_wakeup error reading target_cpu");
             }
         }
     }
@@ -234,7 +234,7 @@ fn try_sched_wakeup(ctx: TracePointContext) -> Result<u32, u32> {
 /// format:
 /// 	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
 /// 	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
-/// 	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+/// 	field:unsigned char common_preempt_COUNT;	offset:3;	size:1;	signed:0;
 /// 	field:int common_pid;	offset:4;	size:4;	signed:1;
 ///
 /// 	field:char comm[16];	offset:8;	size:16;	signed:0;
@@ -271,8 +271,8 @@ fn try_sched_wakeup_new(ctx: TracePointContext) -> Result<u32, u32> {
             Ok(pid) => {
                 info!(&ctx, "sched_wakeup_new pid: {}", pid);
             }
-            Err(e) => {
-                warn!(&ctx, "sched_wakeup_new error: {}", e);
+            Err(_) => {
+                warn!(&ctx, "sched_wakeup_new error reading pid");
             }
         }
         let prio = ctx.read_at::<i32>(28);
@@ -280,8 +280,8 @@ fn try_sched_wakeup_new(ctx: TracePointContext) -> Result<u32, u32> {
             Ok(prio) => {
                 info!(&ctx, "sched_wakeup_new prio: {}", prio);
             }
-            Err(e) => {
-                warn!(&ctx, "sched_wakeup_new error: {}", e);
+            Err(_) => {
+                warn!(&ctx, "sched_wakeup_new error reading prio");
             }
         }
         let target_cpu = ctx.read_at::<i32>(32);
@@ -289,8 +289,8 @@ fn try_sched_wakeup_new(ctx: TracePointContext) -> Result<u32, u32> {
             Ok(target_cpu) => {
                 info!(&ctx, "sched_wakeup_new target_cpu: {}", target_cpu);
             }
-            Err(e) => {
-                warn!(&ctx, "sched_wakeup_new error: {}", e);
+            Err(_) => {
+                warn!(&ctx, "sched_wakeup_new error reading target_cpu");
             }
         }
     }
@@ -304,7 +304,7 @@ fn try_sched_wakeup_new(ctx: TracePointContext) -> Result<u32, u32> {
 /// format:
 /// 	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
 /// 	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
-/// 	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+/// 	field:unsigned char common_preempt_COUNT;	offset:3;	size:1;	signed:0;
 /// 	field:int common_pid;	offset:4;	size:4;	signed:1;
 ///
 /// 	field:char comm[16];	offset:8;	size:16;	signed:0;
@@ -341,8 +341,8 @@ fn try_sched_waking(ctx: TracePointContext) -> Result<u32, u32> {
             Ok(pid) => {
                 info!(&ctx, "sched_waking pid: {}", pid);
             }
-            Err(e) => {
-                warn!(&ctx, "sched_waking error: {}", e);
+            Err(_) => {
+                warn!(&ctx, "sched_waking error reading pid");
             }
         }
         let prio = ctx.read_at::<i32>(28);
@@ -350,8 +350,8 @@ fn try_sched_waking(ctx: TracePointContext) -> Result<u32, u32> {
             Ok(prio) => {
                 info!(&ctx, "sched_waking prio: {}", prio);
             }
-            Err(e) => {
-                warn!(&ctx, "sched_waking error: {}", e);
+            Err(_) => {
+                warn!(&ctx, "sched_waking error reading prio");
             }
         }
         let target_cpu = ctx.read_at::<i32>(32);
@@ -359,8 +359,8 @@ fn try_sched_waking(ctx: TracePointContext) -> Result<u32, u32> {
             Ok(target_cpu) => {
                 info!(&ctx, "sched_waking target_cpu: {}", target_cpu);
             }
-            Err(e) => {
-                warn!(&ctx, "sched_waking error: {}", e);
+            Err(_) => {
+                warn!(&ctx, "sched_waking error reading target_cpu");
             }
         }
     }
@@ -374,7 +374,7 @@ fn try_sched_waking(ctx: TracePointContext) -> Result<u32, u32> {
 /// format:
 /// 	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
 /// 	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
-/// 	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+/// 	field:unsigned char common_preempt_COUNT;	offset:3;	size:1;	signed:0;
 /// 	field:int common_pid;	offset:4;	size:4;	signed:1;
 ///
 /// 	field:char comm[16];	offset:8;	size:16;	signed:0;
@@ -410,8 +410,8 @@ fn try_sched_wait_task(ctx: TracePointContext) -> Result<u32, u32> {
             Ok(pid) => {
                 info!(&ctx, "sched_wait_task pid: {}", pid);
             }
-            Err(e) => {
-                warn!(&ctx, "sched_wait_task error: {}", e);
+            Err(_) => {
+                warn!(&ctx, "sched_wait_task error reading pid");
             }
         }
         let prio = ctx.read_at::<i32>(28);
@@ -419,8 +419,8 @@ fn try_sched_wait_task(ctx: TracePointContext) -> Result<u32, u32> {
             Ok(prio) => {
                 info!(&ctx, "sched_wait_task prio: {}", prio);
             }
-            Err(e) => {
-                warn!(&ctx, "sched_wait_task error: {}", e);
+            Err(_) => {
+                warn!(&ctx, "sched_wait_task error reading prio");
             }
         }
     }

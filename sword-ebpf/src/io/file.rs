@@ -1,14 +1,16 @@
+use core::str::from_utf8_unchecked;
+
 ///
 /// 先从sys_enter_open/sys_enter_openat/sys_enter_read/write的调用
 ///
 use aya_ebpf::{
     cty::c_long,
-    helpers::{bpf_probe_read_user, bpf_probe_read_user_str_bytes},
+    helpers::bpf_probe_read_user_str_bytes,
     macros::{map, tracepoint},
     maps::PerCpuArray,
     programs::TracePointContext,
 };
-use aya_log_ebpf::{info, warn};
+use aya_log_ebpf::info;
 
 const LOG_BUF_CAPACITY: usize = 1024;
 
@@ -24,7 +26,7 @@ pub static mut BUF: PerCpuArray<Buf> = PerCpuArray::with_max_entries(1, 0);
 pub fn sys_enter_open(ctx: TracePointContext) -> u32 {
     match try_sys_enter_open(ctx) {
         Ok(ret) => ret as u32,
-        Err(ret) => 1 as u32,
+        Err(_) => 1 as u32,
     }
 }
 
@@ -63,7 +65,7 @@ fn try_sys_enter_open(ctx: TracePointContext) -> Result<c_long, c_long> {
 pub fn sys_enter_openat(ctx: TracePointContext) -> u32 {
     match try_sys_enter_openat(ctx) {
         Ok(ret) => ret as u32,
-        Err(ret) => ret as u32,
+        Err(_) => 1 as u32,
     }
 }
 
@@ -89,17 +91,23 @@ pub fn sys_enter_openat(ctx: TracePointContext) -> u32 {
 fn try_sys_enter_openat(ctx: TracePointContext) -> Result<c_long, c_long> {
     unsafe {
         // 读取 __syscall_nr
-        let syscall_nr = ctx.read_at::<u32>(8);
-        match syscall_nr {
-            Ok(nr) => info!(&ctx, "sys_enter_openat syscall_nr: {}", nr),
-            Err(_) => warn!(&ctx, "read __syscall_nr error"),
-        }
-
+        let syscall_nr = ctx.read_at::<u32>(8)?;
+        info!(&ctx, "sys_enter_openat syscall_nr: {}", syscall_nr);
         let flags: u64 = ctx.read_at(32)?;
         info!(&ctx, "flags: {}", flags);
         let mode: u64 = ctx.read_at(40)?;
         let mode_val = mode as u32;
         info!(&ctx, "mode: {} (0x{:x})", mode_val, mode_val);
+
+        //专门的读取filename这个信息,这个地方要注意,这个filename是一个指针,不是字符数组
+        let mut buf = [0u8; 256];
+        let filename = {
+            let filename_src_addr = ctx.read_at::<*const u8>(24)?;
+            let filename_bytes = bpf_probe_read_user_str_bytes(filename_src_addr, &mut buf)?;
+            from_utf8_unchecked(filename_bytes)
+        };
+
+        info!(&ctx, "filename: {}", filename);
     }
     Ok(0)
 }
