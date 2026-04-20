@@ -142,9 +142,7 @@ pub fn generate_realistic_phone() -> String {
     let prefix = CHINA_MOBILE_PREFIXES[rng.gen_range(0..CHINA_MOBILE_PREFIXES.len())];
 
     // 生成剩余的 8 位数字
-    let suffix: String = (0..8)
-        .map(|_| rng.gen_range(0..10).to_string())
-        .collect();
+    let suffix: String = (0..8).map(|_| rng.gen_range(0..10).to_string()).collect();
 
     format!("{}{}", prefix, suffix)
 }
@@ -339,6 +337,10 @@ mod tests {
         }
 
         // 应该有接近 1000 个不同的手机号（允许少量碰撞）
-        assert!(phones.len() > 990, "Expected > 990 unique phones, got {}", phones.len());
+        assert!(
+            phones.len() > 990,
+            "Expected > 990 unique phones, got {}",
+            phones.len()
+        );
     }
 }

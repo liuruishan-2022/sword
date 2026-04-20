@@ -36,7 +36,7 @@ pub fn load_sched_wait_task(ebpf: &mut aya::Ebpf) -> anyhow::Result<()> {
 }
 
 pub fn load_sched(ebpf: &mut aya::Ebpf) -> anyhow::Result<()> {
-    //load_sched_switch(ebpf)?;
+    load_sched_switch(ebpf)?;
     //load_sched_wakeup(ebpf)?;
     //load_sched_wakeup_new(ebpf)?;
     //load_sched_waking(ebpf)?;

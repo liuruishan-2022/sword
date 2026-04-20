@@ -8,9 +8,10 @@ pub mod io;
 /// 3. memory
 /// 4. network
 /// 5. block
+///
 fn load_tracepoint(ebpf: &mut aya::Ebpf) -> anyhow::Result<()> {
-    //cpu::load_sched(ebpf)?;
-    io::load_io(ebpf)?;
+    cpu::load_sched(ebpf)?;
+    //io::load_io(ebpf)?;
     Ok(())
 }
 
