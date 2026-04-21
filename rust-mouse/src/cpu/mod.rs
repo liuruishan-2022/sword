@@ -12,3 +12,12 @@ pub async fn sched_search() {
     // 在主线程中执行第二个 search（会阻塞在这里）
     sched::search().await;
 }
+
+pub fn sched_switch(workers: Option<usize>, pin_cpu: Option<usize>) {
+    let mut config = sched::SchedSwitchConfig::default();
+    if let Some(workers) = workers {
+        config.workers = workers;
+    }
+    config.pin_cpu = pin_cpu;
+    sched::start_sched_switch_simulator(config);
+}

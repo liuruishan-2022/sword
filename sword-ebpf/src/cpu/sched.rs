@@ -3,7 +3,11 @@ use core::str;
 ///
 /// 放置cpu调度相关的处理代码逻辑
 ///
-use aya_ebpf::{macros::tracepoint, programs::TracePointContext};
+use aya_ebpf::{
+    macros::{map, tracepoint},
+    maps::Array,
+    programs::TracePointContext,
+};
 use aya_log_ebpf::{info, warn};
 
 const TASK_COMM_LEN: usize = 16;
@@ -14,6 +18,9 @@ const PREV_STATE_OFFSET: usize = 32;
 const NEXT_COMM_OFFSET: usize = 40;
 const NEXT_PID_OFFSET: usize = 56;
 const NEXT_PRIO_OFFSET: usize = 60;
+
+#[map]
+pub static SCHED_SWITCH_TARGET_PID: Array<u32> = Array::with_max_entries(1, 0);
 
 #[tracepoint]
 pub fn sched_switch(ctx: TracePointContext) -> u32 {
@@ -49,12 +56,21 @@ pub fn sched_switch(ctx: TracePointContext) -> u32 {
 /// 同理next也是这样子
 
 fn try_sched_switch(ctx: TracePointContext) -> Result<u32, u32> {
-    let Ok(prev_comm) = (unsafe { ctx.read_at::<[u8; TASK_COMM_LEN]>(PREV_COMM_OFFSET) }) else {
-        warn!(&ctx, "sched_switch: failed to read prev_comm");
-        return Ok(0);
-    };
     let Ok(prev_pid) = (unsafe { ctx.read_at::<i32>(PREV_PID_OFFSET) }) else {
         warn!(&ctx, "sched_switch: failed to read prev_pid");
+        return Ok(0);
+    };
+    let Ok(next_pid) = (unsafe { ctx.read_at::<i32>(NEXT_PID_OFFSET) }) else {
+        warn!(&ctx, "sched_switch: failed to read next_pid");
+        return Ok(0);
+    };
+
+    if !matches_target_pid(prev_pid, next_pid) {
+        return Ok(0);
+    }
+
+    let Ok(prev_comm) = (unsafe { ctx.read_at::<[u8; TASK_COMM_LEN]>(PREV_COMM_OFFSET) }) else {
+        warn!(&ctx, "sched_switch: failed to read prev_comm");
         return Ok(0);
     };
     let Ok(prev_prio) = (unsafe { ctx.read_at::<i32>(PREV_PRIO_OFFSET) }) else {
@@ -67,10 +83,6 @@ fn try_sched_switch(ctx: TracePointContext) -> Result<u32, u32> {
     };
     let Ok(next_comm) = (unsafe { ctx.read_at::<[u8; TASK_COMM_LEN]>(NEXT_COMM_OFFSET) }) else {
         warn!(&ctx, "sched_switch: failed to read next_comm");
-        return Ok(0);
-    };
-    let Ok(next_pid) = (unsafe { ctx.read_at::<i32>(NEXT_PID_OFFSET) }) else {
-        warn!(&ctx, "sched_switch: failed to read next_pid");
         return Ok(0);
     };
     let Ok(next_prio) = (unsafe { ctx.read_at::<i32>(NEXT_PRIO_OFFSET) }) else {
@@ -91,6 +103,19 @@ fn try_sched_switch(ctx: TracePointContext) -> Result<u32, u32> {
     );
 
     Ok(0)
+}
+
+fn matches_target_pid(prev_pid: i32, next_pid: i32) -> bool {
+    let Some(target_pid) = SCHED_SWITCH_TARGET_PID.get(0) else {
+        return true;
+    };
+
+    if *target_pid == 0 {
+        return true;
+    }
+
+    let target_pid = *target_pid as i32;
+    prev_pid == target_pid || next_pid == target_pid
 }
 
 fn task_comm(comm: &[u8; TASK_COMM_LEN]) -> &str {
