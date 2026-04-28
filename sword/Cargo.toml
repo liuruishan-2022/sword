@@ -11,15 +11,18 @@ sword-common = { path = "../sword-common", features = ["user"] }
 anyhow = { workspace = true, default-features = true }
 aya = { workspace = true }
 aya-log = { workspace = true }
+axum = { workspace = true }
 env_logger = { workspace = true }
 libc = { workspace = true }
 log = { workspace = true }
+prometheus-client = { workspace = true }
 tokio = { workspace = true, features = [
     "macros",
     "rt",
     "rt-multi-thread",
     "net",
     "signal",
+    "sync",
 ] }
 [build-dependencies]
 anyhow = { workspace = true }

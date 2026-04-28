@@ -88,9 +88,7 @@ pub fn load_sched_switch(ebpf: &mut aya::Ebpf) -> anyhow::Result<()> {
     if let Some((target_tgid, tid_count)) = target {
         info!(
             "attached sched:sched_switch with tgid filter {}; loaded {} tids from /proc/{}/task",
-            target_tgid,
-            tid_count,
-            target_tgid
+            target_tgid, tid_count, target_tgid
         );
     } else {
         info!("attached sched:sched_switch without pid/tid filter");
@@ -98,39 +96,7 @@ pub fn load_sched_switch(ebpf: &mut aya::Ebpf) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub fn load_sched_wakeup(ebpf: &mut aya::Ebpf) -> anyhow::Result<()> {
-    let program: &mut TracePoint = ebpf.program_mut("sched_wakeup").unwrap().try_into()?;
-    program.load()?;
-    program.attach("sched", "sched_wakeup")?;
-    Ok(())
-}
-
-pub fn load_sched_wakeup_new(ebpf: &mut aya::Ebpf) -> anyhow::Result<()> {
-    let program: &mut TracePoint = ebpf.program_mut("sched_wakeup_new").unwrap().try_into()?;
-    program.load()?;
-    program.attach("sched", "sched_wakeup_new")?;
-    Ok(())
-}
-
-pub fn load_sched_waking(ebpf: &mut aya::Ebpf) -> anyhow::Result<()> {
-    let program: &mut TracePoint = ebpf.program_mut("sched_waking").unwrap().try_into()?;
-    program.load()?;
-    program.attach("sched", "sched_waking")?;
-    Ok(())
-}
-
-pub fn load_sched_wait_task(ebpf: &mut aya::Ebpf) -> anyhow::Result<()> {
-    let program: &mut TracePoint = ebpf.program_mut("sched_wait_task").unwrap().try_into()?;
-    program.load()?;
-    program.attach("sched", "sched_wait_task")?;
-    Ok(())
-}
-
 pub fn load_sched(ebpf: &mut aya::Ebpf) -> anyhow::Result<()> {
     load_sched_switch(ebpf)?;
-    //load_sched_wakeup(ebpf)?;
-    //load_sched_wakeup_new(ebpf)?;
-    //load_sched_waking(ebpf)?;
-    //load_sched_wait_task(ebpf)?;
     Ok(())
 }

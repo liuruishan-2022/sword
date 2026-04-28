@@ -3,6 +3,7 @@ use log::{debug, warn};
 use tokio::signal;
 
 pub mod loader;
+pub mod metrics;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -46,6 +47,7 @@ async fn main() -> anyhow::Result<()> {
     }
 
     loader::load_ebpf(&mut ebpf)?;
+    metrics::spawn_prometheus_exporter(&mut ebpf).await?;
 
     let ctrl_c = signal::ctrl_c();
     println!("Waiting for Ctrl-C...");
