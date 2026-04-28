@@ -1,1 +1,3 @@
 #![no_std]
+
+pub const SCHED_SWITCH_TARGET_TIDS_MAX_ENTRIES: u32 = 4096;

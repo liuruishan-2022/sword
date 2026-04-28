@@ -1,32 +1,40 @@
-use core::str;
+use core::{f32::consts::E, str};
 
 ///
 /// 放置cpu调度相关的处理代码逻辑
 ///
 use aya_ebpf::{
     macros::{map, tracepoint},
-    maps::Array,
+    maps::{Array, HashMap, PerCpuArray},
     programs::TracePointContext,
 };
 use aya_log_ebpf::{info, warn};
+use sword_common::SCHED_SWITCH_TARGET_TIDS_MAX_ENTRIES;
 
-const TASK_COMM_LEN: usize = 16;
-const PREV_COMM_OFFSET: usize = 8;
+use crate::common;
+
+const LOG_EVERY_N: u32 = 10_000;
 const PREV_PID_OFFSET: usize = 24;
 const PREV_PRIO_OFFSET: usize = 28;
 const PREV_STATE_OFFSET: usize = 32;
-const NEXT_COMM_OFFSET: usize = 40;
 const NEXT_PID_OFFSET: usize = 56;
 const NEXT_PRIO_OFFSET: usize = 60;
 
 #[map]
-pub static SCHED_SWITCH_TARGET_PID: Array<u32> = Array::with_max_entries(1, 0);
+pub static SCHED_SWITCH_TARGET_TGID: Array<u32> = Array::with_max_entries(1, 0);
+
+#[map]
+pub static SCHED_SWITCH_TARGET_TIDS: HashMap<u32, u8> =
+    HashMap::with_max_entries(SCHED_SWITCH_TARGET_TIDS_MAX_ENTRIES, 0);
+
+#[map]
+pub static SCHED_SWITCH_LOG_COUNTER: PerCpuArray<u32> = PerCpuArray::with_max_entries(1, 0);
 
 #[tracepoint]
 pub fn sched_switch(ctx: TracePointContext) -> u32 {
     match try_sched_switch(ctx) {
         Ok(ret) => ret,
-        Err(ret) => ret,
+        Err(ret) => ret as u32,
     }
 }
 
@@ -55,75 +63,27 @@ pub fn sched_switch(ctx: TracePointContext) -> u32 {
 /// prev_state: 上一个进程的状态
 /// 同理next也是这样子
 
-fn try_sched_switch(ctx: TracePointContext) -> Result<u32, u32> {
-    let Ok(prev_pid) = (unsafe { ctx.read_at::<i32>(PREV_PID_OFFSET) }) else {
-        warn!(&ctx, "sched_switch: failed to read prev_pid");
-        return Ok(0);
-    };
-    let Ok(next_pid) = (unsafe { ctx.read_at::<i32>(NEXT_PID_OFFSET) }) else {
-        warn!(&ctx, "sched_switch: failed to read next_pid");
-        return Ok(0);
-    };
-
-    if !matches_target_pid(prev_pid, next_pid) {
-        return Ok(0);
+fn try_sched_switch(ctx: TracePointContext) -> Result<u32, i64> {
+    unsafe {
+        let prev_comm = ctx.read_at::<[u8; 16]>(8)?;
+        info!(
+            &ctx,
+            "sched_switch prev_comm: {}",
+            common::byte_to_str(&prev_comm)
+        );
+        let prev_pid = ctx.read_at::<i32>(24)?;
+        info!(&ctx, "sched_switch prev_pid: {}", prev_pid);
+        let next_comm = ctx.read_at::<[u8; 16]>(40)?;
+        info!(
+            &ctx,
+            "sched_switch next_comm: {}",
+            common::byte_to_str(&next_comm)
+        );
+        let next_pid = ctx.read_at::<i32>(56)?;
+        info!(&ctx, "sched_switch next_pid: {}", next_pid);
     }
-
-    let Ok(prev_comm) = (unsafe { ctx.read_at::<[u8; TASK_COMM_LEN]>(PREV_COMM_OFFSET) }) else {
-        warn!(&ctx, "sched_switch: failed to read prev_comm");
-        return Ok(0);
-    };
-    let Ok(prev_prio) = (unsafe { ctx.read_at::<i32>(PREV_PRIO_OFFSET) }) else {
-        warn!(&ctx, "sched_switch: failed to read prev_prio");
-        return Ok(0);
-    };
-    let Ok(prev_state) = (unsafe { ctx.read_at::<i64>(PREV_STATE_OFFSET) }) else {
-        warn!(&ctx, "sched_switch: failed to read prev_state");
-        return Ok(0);
-    };
-    let Ok(next_comm) = (unsafe { ctx.read_at::<[u8; TASK_COMM_LEN]>(NEXT_COMM_OFFSET) }) else {
-        warn!(&ctx, "sched_switch: failed to read next_comm");
-        return Ok(0);
-    };
-    let Ok(next_prio) = (unsafe { ctx.read_at::<i32>(NEXT_PRIO_OFFSET) }) else {
-        warn!(&ctx, "sched_switch: failed to read next_prio");
-        return Ok(0);
-    };
-
-    info!(
-        &ctx,
-        "sched_switch prev={}({}) prio={} state={} -> next={}({}) prio={}",
-        task_comm(&prev_comm),
-        prev_pid,
-        prev_prio,
-        prev_state,
-        task_comm(&next_comm),
-        next_pid,
-        next_prio
-    );
 
     Ok(0)
-}
-
-fn matches_target_pid(prev_pid: i32, next_pid: i32) -> bool {
-    let Some(target_pid) = SCHED_SWITCH_TARGET_PID.get(0) else {
-        return true;
-    };
-
-    if *target_pid == 0 {
-        return true;
-    }
-
-    let target_pid = *target_pid as i32;
-    prev_pid == target_pid || next_pid == target_pid
-}
-
-fn task_comm(comm: &[u8; TASK_COMM_LEN]) -> &str {
-    let len = comm
-        .iter()
-        .position(|byte| *byte == 0)
-        .unwrap_or(TASK_COMM_LEN);
-    unsafe { str::from_utf8_unchecked(&comm[..len]) }
 }
 
 ///
