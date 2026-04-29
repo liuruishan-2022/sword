@@ -42,7 +42,7 @@ spec:
       serviceAccountName: sword-ebpf
       containers:
       - name: sword
-        image: xwharbor.wxchina.com/cpaas/component/sword:v0.1.0-e3b9a4807d
+        image: xwharbor.wxchina.com/cpaas/component/sword:v0.1.0-0dd23f3a6c
         imagePullPolicy: IfNotPresent
         securityContext:
           privileged: true
@@ -103,7 +103,7 @@ spec:
   endpoints:
   - interval: 15s
     path: /metrics
-    port: http
+    port: monitoring
   namespaceSelector:
     matchNames:
     - monitoring
