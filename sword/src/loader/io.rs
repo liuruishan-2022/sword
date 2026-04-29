@@ -16,6 +16,6 @@ pub fn load_sys_enter_openat(ebpf: &mut aya::Ebpf) -> anyhow::Result<()> {
 
 pub fn load_io(ebpf: &mut aya::Ebpf) -> anyhow::Result<()> {
     load_sys_enter_open(ebpf)?;
-    load_sys_enter_openat(ebpf)?;
+    //load_sys_enter_openat(ebpf)?;
     Ok(())
 }

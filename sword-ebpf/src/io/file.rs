@@ -56,13 +56,13 @@ fn try_sys_enter_open(ctx: TracePointContext) -> Result<c_long, c_long> {
             *count += 1;
         }
         // 读取 __syscall_nr
-        let syscall_nr = ctx.read_at::<u32>(8)?;
-        info!(&ctx, "sys_enter_open syscall_nr: {}", syscall_nr);
+        //let syscall_nr = ctx.read_at::<u32>(8)?;
+        //info!(&ctx, "sys_enter_open syscall_nr: {}", syscall_nr);
 
-        let flags = ctx.read_at::<u64>(24)?;
-        info!(&ctx, "flags: {}", flags);
-        let mode = ctx.read_at::<u64>(32)?;
-        info!(&ctx, "mode: {} (0x{:x})", mode, mode);
+        //let flags = ctx.read_at::<u64>(24)?;
+        //info!(&ctx, "flags: {}", flags);
+        //let mode = ctx.read_at::<u64>(32)?;
+        //info!(&ctx, "mode: {} (0x{:x})", mode, mode);
     }
     Ok(0)
 }

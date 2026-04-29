@@ -8,7 +8,7 @@ use axum::{
     response::IntoResponse,
     routing::get,
 };
-use aya::maps::PerCpuArray;
+use aya::maps::{MapData, PerCpuArray};
 use log::{error, info};
 use tokio::net::TcpListener;
 use tokio::sync::Mutex;
@@ -24,9 +24,14 @@ pub async fn spawn_prometheus_exporter(ebpf: &mut aya::Ebpf) -> anyhow::Result<(
     let map = ebpf
         .take_map(SCHED_SWITCH_TOTAL_MAP)
         .ok_or_else(|| anyhow::anyhow!("map {SCHED_SWITCH_TOTAL_MAP} not found"))?;
-    let sched_switch_total_map: PerCpuArray<_, u64> = PerCpuArray::try_from(map)?;
+    let sched_switch_total_map: PerCpuArray<MapData, u64> = PerCpuArray::try_from(map)?;
 
-    let cpu_state = CpuCollector::new(sched_switch_total_map);
+    let map = ebpf
+        .take_map(SYS_ENTER_OPEN_COUNTER_MAP)
+        .ok_or_else(|| anyhow::anyhow!("map {SYS_ENTER_OPEN_COUNTER_MAP} not found"))?;
+    let sys_enter_open_counter_map: PerCpuArray<MapData, u64> = PerCpuArray::try_from(map)?;
+
+    let cpu_state = CpuCollector::new(sched_switch_total_map, sys_enter_open_counter_map);
     let cpu_state = Arc::new(Mutex::new(cpu_state));
 
     let app = Router::new()
