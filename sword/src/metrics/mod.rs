@@ -1,4 +1,4 @@
-use std::{env, net::SocketAddr, sync::Arc};
+use std::sync::Arc;
 
 use axum::{
     Router,
@@ -8,13 +8,8 @@ use axum::{
     response::IntoResponse,
     routing::get,
 };
-use aya::maps::{MapData, PerCpuArray};
+use aya::maps::PerCpuArray;
 use log::{error, info};
-use prometheus_client::{
-    encoding::{EncodeLabelSet, text::encode},
-    metrics::{counter::Counter, family::Family},
-    registry::Registry,
-};
 use tokio::net::TcpListener;
 use tokio::sync::Mutex;
 

@@ -1,10 +1,9 @@
 use std::sync::atomic::AtomicU64;
 
-use aya::maps::{Map, MapData, MapError, PerCpuArray};
+use aya::maps::{MapData, MapError, PerCpuArray};
 use prometheus_client::{
     encoding::{EncodeLabelSet, text::encode},
     metrics::{
-        counter::{self, Counter},
         family::Family,
         gauge::Gauge,
     },
