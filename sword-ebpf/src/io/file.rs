@@ -1,3 +1,5 @@
+use core::ops::Add;
+
 ///
 /// 先从sys_enter_open/sys_enter_openat/sys_enter_read/write的调用
 ///
@@ -19,6 +21,9 @@ pub struct Buf {
 
 #[map]
 pub static BUF: PerCpuArray<Buf> = PerCpuArray::with_max_entries(1, 0);
+
+#[map]
+pub static SYS_ENTER_OPEN_COUNTER: PerCpuArray<u64> = PerCpuArray::with_max_entries(1, 0);
 
 #[tracepoint]
 pub fn sys_enter_open(ctx: TracePointContext) -> u32 {
@@ -47,6 +52,9 @@ pub fn sys_enter_open(ctx: TracePointContext) -> u32 {
 ///
 fn try_sys_enter_open(ctx: TracePointContext) -> Result<c_long, c_long> {
     unsafe {
+        if let Some(count) = SYS_ENTER_OPEN_COUNTER.get_ptr_mut(0) {
+            *count += 1;
+        }
         // 读取 __syscall_nr
         let syscall_nr = ctx.read_at::<u32>(8)?;
         info!(&ctx, "sys_enter_open syscall_nr: {}", syscall_nr);
