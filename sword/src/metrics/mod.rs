@@ -36,6 +36,7 @@ pub async fn spawn_prometheus_exporter(ebpf: &mut aya::Ebpf) -> anyhow::Result<(
 
     let app = Router::new()
         .route("/metrics", get(metrics_handler))
+        .route("/health", get(health_handler))
         .with_state(cpu_state);
     let listener = TcpListener::bind("0.0.0.0:9898").await?;
 
@@ -47,6 +48,13 @@ pub async fn spawn_prometheus_exporter(ebpf: &mut aya::Ebpf) -> anyhow::Result<(
     });
 
     Ok(())
+}
+
+async fn health_handler() -> impl IntoResponse {
+    Response::builder()
+        .status(StatusCode::OK)
+        .body(Body::from("ok"))
+        .unwrap()
 }
 
 async fn metrics_handler(
