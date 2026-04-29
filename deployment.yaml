@@ -1,0 +1,129 @@
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: sword-ebpf
+  namespace: monitoring
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: sword-ebpf
+subjects:
+- kind: ServiceAccount
+  name: sword-ebpf
+  namespace: monitoring
+roleRef:
+  kind: ClusterRole
+  name: cluster-admin
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: sword-ebpf
+  namespace: monitoring
+  labels:
+    app: sword-ebpf
+spec:
+  selector:
+    matchLabels:
+      app: sword-ebpf
+  template:
+    metadata:
+      labels:
+        app: sword-ebpf
+    spec:
+      hostNetwork: true
+      hostPID: true
+      hostIPC: true
+      nodeSelector:
+        kops.k8s.io/ebpf: enabled
+      serviceAccountName: sword-ebpf
+      containers:
+      - name: sword
+        image: xwharbor.wxchina.com/cpaas/component/sword:v0.1.0-e3b9a4807d
+        imagePullPolicy: IfNotPresent
+        securityContext:
+          privileged: true
+          capabilities:
+            add:
+            - SYS_ADMIN
+            - SYS_RESOURCE
+            - NET_ADMIN
+        env:
+        - name: RUST_LOG
+          value: "info"
+        ports:
+        - containerPort: 9898
+          hostPort: 9898
+          protocol: TCP
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 9898
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 9898
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        resources:
+          limits:
+            cpu: "500m"
+            memory: "256Mi"
+          requests:
+            cpu: "100m"
+            memory: "64Mi"
+        volumeMounts:
+        - name: sys
+          mountPath: /sys
+          readOnly: true
+        - name: debugfs
+          mountPath: /sys/kernel/debug
+          readOnly: true
+      volumes:
+      - name: sys
+        hostPath:
+          path: /sys
+      - name: debugfs
+        hostPath:
+          path: /sys/kernel/debug
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: sword-ebpf
+  namespace: monitoring
+  labels:
+    app: sword-ebpf
+spec:
+  endpoints:
+  - interval: 15s
+    path: /metrics
+    port: http
+  namespaceSelector:
+    matchNames:
+    - monitoring
+  selector:
+    matchLabels:
+      app: sword-ebpf
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sword-ebpf
+  namespace: monitoring
+  labels:
+    app: sword-ebpf
+spec:
+  type: ClusterIP
+  ports:
+  - port: 9898
+    targetPort: 9898
+    protocol: TCP
+    name: monitoring
+  selector:
+    app: sword-ebpf

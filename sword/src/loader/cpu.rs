@@ -14,10 +14,7 @@ fn configure_sched_switch_target_tids(
     ebpf: &mut aya::Ebpf,
 ) -> anyhow::Result<Option<(u32, usize)>> {
     let target_tgid = match env::var(SCHED_SWITCH_TARGET_TGID_ENV) {
-        Ok(pid) => Some(
-            pid.parse::<u32>()
-                .map_err(|err| anyhow::anyhow!("invalid {SCHED_SWITCH_TARGET_TGID_ENV}: {err}"))?,
-        ),
+        Ok(pid) => parse_sched_switch_target_tgid(&pid)?,
         Err(env::VarError::NotPresent) => None,
         Err(err) => {
             return Err(anyhow::anyhow!(
@@ -54,6 +51,18 @@ fn configure_sched_switch_target_tids(
     }
 
     Ok(None)
+}
+
+fn parse_sched_switch_target_tgid(value: &str) -> anyhow::Result<Option<u32>> {
+    let value = value.trim();
+    if value.is_empty() {
+        return Ok(None);
+    }
+
+    value
+        .parse::<u32>()
+        .map(Some)
+        .map_err(|err| anyhow::anyhow!("invalid {SCHED_SWITCH_TARGET_TGID_ENV}: {err}"))
 }
 
 fn collect_thread_ids(target_tgid: u32) -> anyhow::Result<Vec<u32>> {
@@ -99,4 +108,30 @@ pub fn load_sched_switch(ebpf: &mut aya::Ebpf) -> anyhow::Result<()> {
 pub fn load_sched(ebpf: &mut aya::Ebpf) -> anyhow::Result<()> {
     load_sched_switch(ebpf)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_sched_switch_target_tgid;
+
+    #[test]
+    fn parse_sched_switch_target_tgid_ignores_empty_values() {
+        assert_eq!(parse_sched_switch_target_tgid("").unwrap(), None);
+        assert_eq!(parse_sched_switch_target_tgid("   ").unwrap(), None);
+    }
+
+    #[test]
+    fn parse_sched_switch_target_tgid_accepts_pid() {
+        assert_eq!(parse_sched_switch_target_tgid("1234").unwrap(), Some(1234));
+        assert_eq!(
+            parse_sched_switch_target_tgid(" 1234 ").unwrap(),
+            Some(1234)
+        );
+    }
+
+    #[test]
+    fn parse_sched_switch_target_tgid_rejects_invalid_pid() {
+        let err = parse_sched_switch_target_tgid("abc").unwrap_err();
+        assert!(err.to_string().contains("invalid SWORD_SCHED_SWITCH_PID"));
+    }
 }
