@@ -8,11 +8,47 @@ use tokio::time::sleep;
 
 const SCHED_SWITCH_TARGET_TIDS_MAP: &str = "SCHED_SWITCH_TARGET_TIDS";
 const SCHED_SWITCH_TARGET_TGID_ENV: &str = "SWORD_SCHED_SWITCH_PID";
+const SCHED_SWITCH_TARGET_COMM_ENV: &str = "SWORD_SCHED_SWITCH_COMM";
 const SCHED_SWITCH_TARGET_TID_PRESENT: u8 = 1;
+
+#[derive(Clone, Debug)]
+enum SchedSwitchTarget {
+    Pid(u32),
+    Comm(String),
+}
+
+impl SchedSwitchTarget {
+    fn description(&self) -> String {
+        match self {
+            Self::Pid(pid) => format!("pid {pid}"),
+            Self::Comm(comm) => format!("comm {comm}"),
+        }
+    }
+}
 
 fn configure_sched_switch_target_tids(
     ebpf: &mut aya::Ebpf,
-) -> anyhow::Result<Option<(u32, usize)>> {
+) -> anyhow::Result<Option<(String, usize)>> {
+    let Some(target) = read_sched_switch_target()? else {
+        return Ok(None);
+    };
+
+    let tids = collect_target_thread_ids(&target)?;
+    validate_target_tids_capacity(&target, tids.len())?;
+
+    let mut tids_map: AyaHashMap<MapData, u32, u8> = AyaHashMap::try_from(
+        ebpf.take_map(SCHED_SWITCH_TARGET_TIDS_MAP)
+            .ok_or_else(|| anyhow::anyhow!("map {SCHED_SWITCH_TARGET_TIDS_MAP} not found"))?,
+    )?;
+    for tid in &tids {
+        tids_map.insert(*tid, SCHED_SWITCH_TARGET_TID_PRESENT, 0)?;
+    }
+    spawn_sched_switch_target_tids_refresher(target.clone(), tids_map, tids.clone());
+
+    Ok(Some((target.description(), tids.len())))
+}
+
+fn read_sched_switch_target() -> anyhow::Result<Option<SchedSwitchTarget>> {
     let target_tgid = match env::var(SCHED_SWITCH_TARGET_TGID_ENV) {
         Ok(pid) => parse_sched_switch_target_tgid(&pid)?,
         Err(env::VarError::NotPresent) => None,
@@ -22,30 +58,33 @@ fn configure_sched_switch_target_tids(
             ));
         }
     };
+    let target_comm = read_optional_env(SCHED_SWITCH_TARGET_COMM_ENV)?;
 
     if let Some(target_tgid) = target_tgid {
-        let tids = collect_thread_ids(target_tgid)?;
-        if tids.len() as u32 > SCHED_SWITCH_TARGET_TIDS_MAX_ENTRIES {
-            return Err(anyhow::anyhow!(
-                "process {target_tgid} has {} tids, exceeds map capacity {}",
-                tids.len(),
-                SCHED_SWITCH_TARGET_TIDS_MAX_ENTRIES
-            ));
+        if target_comm.is_some() {
+            warn!(
+                "both {SCHED_SWITCH_TARGET_TGID_ENV} and {SCHED_SWITCH_TARGET_COMM_ENV} are set; using pid filter"
+            );
         }
-
-        let mut tids_map: AyaHashMap<MapData, u32, u8> = AyaHashMap::try_from(
-            ebpf.take_map(SCHED_SWITCH_TARGET_TIDS_MAP)
-                .ok_or_else(|| anyhow::anyhow!("map {SCHED_SWITCH_TARGET_TIDS_MAP} not found"))?,
-        )?;
-        for tid in &tids {
-            tids_map.insert(*tid, SCHED_SWITCH_TARGET_TID_PRESENT, 0)?;
-        }
-        spawn_sched_switch_target_tids_refresher(target_tgid, tids_map, tids.clone());
-
-        return Ok(Some((target_tgid, tids.len())));
+        return Ok(Some(SchedSwitchTarget::Pid(target_tgid)));
     }
 
-    Ok(None)
+    Ok(target_comm.map(SchedSwitchTarget::Comm))
+}
+
+fn read_optional_env(name: &str) -> anyhow::Result<Option<String>> {
+    match env::var(name) {
+        Ok(value) => {
+            let value = value.trim();
+            if value.is_empty() {
+                Ok(None)
+            } else {
+                Ok(Some(value.to_string()))
+            }
+        }
+        Err(env::VarError::NotPresent) => Ok(None),
+        Err(err) => Err(anyhow::anyhow!("failed to read {name}: {err}")),
+    }
 }
 
 fn parse_sched_switch_target_tgid(value: &str) -> anyhow::Result<Option<u32>> {
@@ -84,8 +123,60 @@ fn collect_thread_ids(target_tgid: u32) -> anyhow::Result<Vec<u32>> {
     Ok(tids)
 }
 
+fn collect_thread_ids_by_comm(target_comm: &str) -> anyhow::Result<Vec<u32>> {
+    let mut tids = Vec::new();
+
+    for entry in fs::read_dir("/proc")? {
+        let entry = entry?;
+        let file_name = entry.file_name();
+        let file_name = file_name.to_string_lossy();
+        let Ok(tgid) = file_name.parse::<u32>() else {
+            continue;
+        };
+
+        let comm_path = format!("/proc/{tgid}/comm");
+        let Ok(comm) = fs::read_to_string(&comm_path) else {
+            continue;
+        };
+        if comm.trim_end() != target_comm {
+            continue;
+        }
+
+        match collect_thread_ids(tgid) {
+            Ok(mut process_tids) => tids.append(&mut process_tids),
+            Err(err) => warn!("failed to collect tids for matching process {tgid}: {err}"),
+        }
+    }
+
+    tids.sort_unstable();
+    tids.dedup();
+    Ok(tids)
+}
+
+fn collect_target_thread_ids(target: &SchedSwitchTarget) -> anyhow::Result<Vec<u32>> {
+    match target {
+        SchedSwitchTarget::Pid(pid) => collect_thread_ids(*pid),
+        SchedSwitchTarget::Comm(comm) => collect_thread_ids_by_comm(comm),
+    }
+}
+
+fn validate_target_tids_capacity(
+    target: &SchedSwitchTarget,
+    tid_count: usize,
+) -> anyhow::Result<()> {
+    if tid_count as u32 > SCHED_SWITCH_TARGET_TIDS_MAX_ENTRIES {
+        return Err(anyhow::anyhow!(
+            "{} has {} tids, exceeds map capacity {}",
+            target.description(),
+            tid_count,
+            SCHED_SWITCH_TARGET_TIDS_MAX_ENTRIES
+        ));
+    }
+    Ok(())
+}
+
 fn spawn_sched_switch_target_tids_refresher(
-    target_tgid: u32,
+    target: SchedSwitchTarget,
     mut tids_map: AyaHashMap<MapData, u32, u8>,
     initial_tids: Vec<u32>,
 ) {
@@ -95,12 +186,12 @@ fn spawn_sched_switch_target_tids_refresher(
         loop {
             sleep(Duration::from_secs(5)).await;
 
-            let current_tids = match collect_thread_ids(target_tgid) {
+            let current_tids = match collect_target_thread_ids(&target) {
                 Ok(tids) => tids.into_iter().collect::<HashSet<_>>(),
                 Err(err) => {
                     warn!(
-                        "failed to refresh tids from /proc/{}/task: {}; removing {} known tids from filter",
-                        target_tgid,
+                        "failed to refresh tids for {}: {}; removing {} known tids from filter",
+                        target.description(),
                         err,
                         known_tids.len()
                     );
@@ -109,12 +200,10 @@ fn spawn_sched_switch_target_tids_refresher(
                 }
             };
 
-            if current_tids.len() as u32 > SCHED_SWITCH_TARGET_TIDS_MAX_ENTRIES {
+            if let Err(err) = validate_target_tids_capacity(&target, current_tids.len()) {
                 warn!(
-                    "process {} has {} tids, exceeds map capacity {}; keeping previous tid filter",
-                    target_tgid,
-                    current_tids.len(),
-                    SCHED_SWITCH_TARGET_TIDS_MAX_ENTRIES
+                    "{err}; keeping previous sched_switch tid filter for {}",
+                    target.description()
                 );
                 continue;
             }
@@ -155,10 +244,10 @@ pub fn load_sched_switch(ebpf: &mut aya::Ebpf) -> anyhow::Result<()> {
     let program: &mut TracePoint = ebpf.program_mut("sched_switch").unwrap().try_into()?;
     program.load()?;
     program.attach("sched", "sched_switch")?;
-    if let Some((target_tgid, tid_count)) = target {
+    if let Some((target, tid_count)) = target {
         info!(
-            "attached sched:sched_switch with tgid filter {}; loaded {} tids from /proc/{}/task",
-            target_tgid, tid_count, target_tgid
+            "attached sched:sched_switch with target {}; loaded {} tids",
+            target, tid_count
         );
     } else {
         info!("attached sched:sched_switch without pid/tid filter");
