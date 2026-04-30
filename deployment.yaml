@@ -42,7 +42,7 @@ spec:
       serviceAccountName: sword-ebpf
       containers:
       - name: sword
-        image: xwharbor.wxchina.com/cpaas/component/sword:v0.1.0-e019df3ffe
+        image: xwharbor.wxchina.com/cpaas/component/sword:v0.1.0-0123311-keypad
         imagePullPolicy: IfNotPresent
         securityContext:
           privileged: true
@@ -65,19 +65,23 @@ spec:
             path: /health
             port: 9898
           initialDelaySeconds: 5
+          timeoutSeconds: 5
           periodSeconds: 10
+          failureThreshold: 6
         readinessProbe:
           httpGet:
             path: /health
             port: 9898
           initialDelaySeconds: 5
+          timeoutSeconds: 5
           periodSeconds: 10
+          failureThreshold: 6
         resources:
           limits:
-            cpu: "500m"
+            cpu: "2"
             memory: "256Mi"
           requests:
-            cpu: "100m"
+            cpu: "500m"
             memory: "64Mi"
         volumeMounts:
         - name: sys
@@ -118,8 +122,11 @@ spec:
         image: xwharbor.wxchina.com/cpaas/component/rust-mouse:v0.1.0-e019df3ffe
         imagePullPolicy: IfNotPresent
         args:
-        - sched-switch
-        - "4"
+        - net-request
+        - https://www.baidu.com/
+        - "1"
+        - "0"
+        - "5000"
         resources:
           limits:
             cpu: "500m"

@@ -6,8 +6,9 @@ pub const SCHED_SWITCH_THREAD_STATE_MAX_ENTRIES: u32 = 32768;
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
 pub struct SchedSwitchStateKey {
-    pub tid: u32,
     pub state: u64,
+    pub tid: u32,
+    pub _pad: u32,
 }
 
 #[repr(C)]

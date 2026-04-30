@@ -12,6 +12,12 @@ use sword_common::{
     SchedSwitchStateKey, ThreadComm, ThreadOffCpuStart,
 };
 
+const SCHED_SWITCH_PREV_COMM_OFFSET: usize = 12;
+const SCHED_SWITCH_PREV_PID_OFFSET: usize = 28;
+const SCHED_SWITCH_PREV_STATE_OFFSET: usize = 40;
+const SCHED_SWITCH_NEXT_COMM_OFFSET: usize = 48;
+const SCHED_SWITCH_NEXT_PID_OFFSET: usize = 64;
+
 #[map]
 pub static SCHED_SWITCH_TARGET_TIDS: HashMap<u32, u8> =
     HashMap::with_max_entries(SCHED_SWITCH_TARGET_TIDS_MAX_ENTRIES, 0);
@@ -56,13 +62,15 @@ pub fn sched_switch(ctx: TracePointContext) -> u32 {
 /// 	field:unsigned char common_preempt_COUNT;	offset:3;	size:1;	signed:0;
 /// 	field:int common_pid;	offset:4;	size:4;	signed:1;
 
-/// 	field:char prev_comm[16];	offset:8;	size:16;	signed:0;
-/// 	field:pid_t prev_pid;	offset:24;	size:4;	signed:1;
-/// 	field:int prev_prio;	offset:28;	size:4;	signed:1;
-/// 	field:long prev_state;	offset:32;	size:8;	signed:1;
-/// 	field:char next_comm[16];	offset:40;	size:16;	signed:0;
-/// 	field:pid_t next_pid;	offset:56;	size:4;	signed:1;
-/// 	field:int next_prio;	offset:60;	size:4;	signed:1;
+/// 	field:unsigned char common_preempt_lazy_count;	offset:8;	size:1;	signed:0;
+///
+/// 	field:char prev_comm[16];	offset:12;	size:16;	signed:1;
+/// 	field:pid_t prev_pid;	offset:28;	size:4;	signed:1;
+/// 	field:int prev_prio;	offset:32;	size:4;	signed:1;
+/// 	field:long prev_state;	offset:40;	size:8;	signed:1;
+/// 	field:char next_comm[16];	offset:48;	size:16;	signed:1;
+/// 	field:pid_t next_pid;	offset:64;	size:4;	signed:1;
+/// 	field:int next_prio;	offset:68;	size:4;	signed:1;
 ///
 /// 字段解析:
 /// prev_comm: 上一个进程的名字,
@@ -79,11 +87,11 @@ fn try_sched_switch(ctx: TracePointContext) -> Result<u32, i64> {
     }
 
     let now = unsafe { bpf_ktime_get_ns() };
-    let prev_comm: [u8; 16] = unsafe { ctx.read_at(8)? };
-    let prev_pid: u32 = unsafe { ctx.read_at(24)? };
-    let prev_state: i64 = unsafe { ctx.read_at(32)? };
-    let next_comm: [u8; 16] = unsafe { ctx.read_at(40)? };
-    let next_pid: u32 = unsafe { ctx.read_at(56)? };
+    let prev_comm: [u8; 16] = unsafe { ctx.read_at(SCHED_SWITCH_PREV_COMM_OFFSET)? };
+    let prev_pid: u32 = unsafe { ctx.read_at(SCHED_SWITCH_PREV_PID_OFFSET)? };
+    let prev_state: i64 = unsafe { ctx.read_at(SCHED_SWITCH_PREV_STATE_OFFSET)? };
+    let next_comm: [u8; 16] = unsafe { ctx.read_at(SCHED_SWITCH_NEXT_COMM_OFFSET)? };
+    let next_pid: u32 = unsafe { ctx.read_at(SCHED_SWITCH_NEXT_PID_OFFSET)? };
 
     handle_switch_out(prev_pid, prev_state, prev_comm, now);
     handle_switch_in(next_pid, next_comm, now);
@@ -115,7 +123,11 @@ fn handle_switch_out(tid: u32, state: i64, comm: [u8; 16], now: u64) {
     }
 
     let state = normalize_task_state(state);
-    let key = SchedSwitchStateKey { tid, state };
+    let key = SchedSwitchStateKey {
+        state,
+        tid,
+        _pad: 0,
+    };
     increment_map_value(&THREAD_SWITCH_OUT_TOTAL, key, 1);
 
     let start = ThreadOffCpuStart { ts_ns: now, state };
@@ -131,8 +143,9 @@ fn handle_switch_in(tid: u32, comm: [u8; 16], now: u64) {
 
     if let Some(start) = unsafe { THREAD_OFFCPU_START_NS.get(&tid) } {
         let key = SchedSwitchStateKey {
-            tid,
             state: start.state,
+            tid,
+            _pad: 0,
         };
         increment_map_value(
             &THREAD_OFFCPU_TOTAL_NS,

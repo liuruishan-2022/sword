@@ -1,0 +1,4 @@
+interface:
+  display_name: "Sword Deploy"
+  short_description: "Commit, build, tag, apply, and verify sword project images."
+  default_prompt: "Use the sword deploy workflow for this project update."
