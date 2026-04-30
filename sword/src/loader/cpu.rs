@@ -1,11 +1,11 @@
-use std::{env, fs};
+use std::{collections::HashSet, env, fs, time::Duration};
 
-use aya::maps::{Array, HashMap};
+use aya::maps::{HashMap as AyaHashMap, MapData};
 use aya::programs::TracePoint;
-use log::info;
+use log::{info, warn};
 use sword_common::SCHED_SWITCH_TARGET_TIDS_MAX_ENTRIES;
+use tokio::time::sleep;
 
-const SCHED_SWITCH_TARGET_TGID_MAP: &str = "SCHED_SWITCH_TARGET_TGID";
 const SCHED_SWITCH_TARGET_TIDS_MAP: &str = "SCHED_SWITCH_TARGET_TIDS";
 const SCHED_SWITCH_TARGET_TGID_ENV: &str = "SWORD_SCHED_SWITCH_PID";
 const SCHED_SWITCH_TARGET_TID_PRESENT: u8 = 1;
@@ -33,19 +33,14 @@ fn configure_sched_switch_target_tids(
             ));
         }
 
-        let mut tgid_map: Array<_, u32> = Array::try_from(
-            ebpf.map_mut(SCHED_SWITCH_TARGET_TGID_MAP)
-                .ok_or_else(|| anyhow::anyhow!("map {SCHED_SWITCH_TARGET_TGID_MAP} not found"))?,
-        )?;
-        tgid_map.set(0, target_tgid, 0)?;
-
-        let mut tids_map: HashMap<_, u32, u8> = HashMap::try_from(
-            ebpf.map_mut(SCHED_SWITCH_TARGET_TIDS_MAP)
+        let mut tids_map: AyaHashMap<MapData, u32, u8> = AyaHashMap::try_from(
+            ebpf.take_map(SCHED_SWITCH_TARGET_TIDS_MAP)
                 .ok_or_else(|| anyhow::anyhow!("map {SCHED_SWITCH_TARGET_TIDS_MAP} not found"))?,
         )?;
         for tid in &tids {
             tids_map.insert(*tid, SCHED_SWITCH_TARGET_TID_PRESENT, 0)?;
         }
+        spawn_sched_switch_target_tids_refresher(target_tgid, tids_map, tids.clone());
 
         return Ok(Some((target_tgid, tids.len())));
     }
@@ -87,6 +82,72 @@ fn collect_thread_ids(target_tgid: u32) -> anyhow::Result<Vec<u32>> {
     }
 
     Ok(tids)
+}
+
+fn spawn_sched_switch_target_tids_refresher(
+    target_tgid: u32,
+    mut tids_map: AyaHashMap<MapData, u32, u8>,
+    initial_tids: Vec<u32>,
+) {
+    tokio::spawn(async move {
+        let mut known_tids = initial_tids.into_iter().collect::<HashSet<_>>();
+
+        loop {
+            sleep(Duration::from_secs(5)).await;
+
+            let current_tids = match collect_thread_ids(target_tgid) {
+                Ok(tids) => tids.into_iter().collect::<HashSet<_>>(),
+                Err(err) => {
+                    warn!(
+                        "failed to refresh tids from /proc/{}/task: {}; removing {} known tids from filter",
+                        target_tgid,
+                        err,
+                        known_tids.len()
+                    );
+                    remove_known_tids(&mut tids_map, &mut known_tids);
+                    continue;
+                }
+            };
+
+            if current_tids.len() as u32 > SCHED_SWITCH_TARGET_TIDS_MAX_ENTRIES {
+                warn!(
+                    "process {} has {} tids, exceeds map capacity {}; keeping previous tid filter",
+                    target_tgid,
+                    current_tids.len(),
+                    SCHED_SWITCH_TARGET_TIDS_MAX_ENTRIES
+                );
+                continue;
+            }
+
+            for tid in current_tids.difference(&known_tids) {
+                if let Err(err) = tids_map.insert(*tid, SCHED_SWITCH_TARGET_TID_PRESENT, 0) {
+                    warn!("failed to add tid {} to sched_switch filter: {}", tid, err);
+                }
+            }
+
+            for tid in known_tids.difference(&current_tids) {
+                if let Err(err) = tids_map.remove(tid) {
+                    warn!(
+                        "failed to remove tid {} from sched_switch filter: {}",
+                        tid, err
+                    );
+                }
+            }
+
+            known_tids = current_tids;
+        }
+    });
+}
+
+fn remove_known_tids(tids_map: &mut AyaHashMap<MapData, u32, u8>, known_tids: &mut HashSet<u32>) {
+    for tid in known_tids.drain() {
+        if let Err(err) = tids_map.remove(&tid) {
+            warn!(
+                "failed to remove tid {} from sched_switch filter: {}",
+                tid, err
+            );
+        }
+    }
 }
 
 pub fn load_sched_switch(ebpf: &mut aya::Ebpf) -> anyhow::Result<()> {

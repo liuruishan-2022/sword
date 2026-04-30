@@ -8,8 +8,9 @@ use axum::{
     response::IntoResponse,
     routing::get,
 };
-use aya::maps::{MapData, PerCpuArray};
+use aya::maps::{HashMap, MapData, PerCpuArray};
 use log::{error, info};
+use sword_common::{SchedSwitchStateKey, ThreadComm};
 use tokio::net::TcpListener;
 use tokio::sync::Mutex;
 
@@ -18,6 +19,9 @@ use crate::metrics::cpu::CpuCollector;
 pub mod cpu;
 
 const SCHED_SWITCH_TOTAL_MAP: &str = "SCHED_SWITCH_TOTAL";
+const THREAD_SWITCH_OUT_TOTAL_MAP: &str = "THREAD_SWITCH_OUT_TOTAL";
+const THREAD_OFFCPU_TOTAL_NS_MAP: &str = "THREAD_OFFCPU_TOTAL_NS";
+const THREAD_COMM_MAP: &str = "THREAD_COMM";
 const SYS_ENTER_OPEN_COUNTER_MAP: &str = "SYS_ENTER_OPEN_COUNTER";
 
 pub async fn spawn_prometheus_exporter(ebpf: &mut aya::Ebpf) -> anyhow::Result<()> {
@@ -31,7 +35,30 @@ pub async fn spawn_prometheus_exporter(ebpf: &mut aya::Ebpf) -> anyhow::Result<(
         .ok_or_else(|| anyhow::anyhow!("map {SYS_ENTER_OPEN_COUNTER_MAP} not found"))?;
     let sys_enter_open_counter_map: PerCpuArray<MapData, u64> = PerCpuArray::try_from(map)?;
 
-    let cpu_state = CpuCollector::new(sched_switch_total_map, sys_enter_open_counter_map);
+    let map = ebpf
+        .take_map(THREAD_SWITCH_OUT_TOTAL_MAP)
+        .ok_or_else(|| anyhow::anyhow!("map {THREAD_SWITCH_OUT_TOTAL_MAP} not found"))?;
+    let thread_switch_out_total_map: HashMap<MapData, SchedSwitchStateKey, u64> =
+        HashMap::try_from(map)?;
+
+    let map = ebpf
+        .take_map(THREAD_OFFCPU_TOTAL_NS_MAP)
+        .ok_or_else(|| anyhow::anyhow!("map {THREAD_OFFCPU_TOTAL_NS_MAP} not found"))?;
+    let thread_offcpu_total_ns_map: HashMap<MapData, SchedSwitchStateKey, u64> =
+        HashMap::try_from(map)?;
+
+    let map = ebpf
+        .take_map(THREAD_COMM_MAP)
+        .ok_or_else(|| anyhow::anyhow!("map {THREAD_COMM_MAP} not found"))?;
+    let thread_comm_map: HashMap<MapData, u32, ThreadComm> = HashMap::try_from(map)?;
+
+    let cpu_state = CpuCollector::new(
+        sched_switch_total_map,
+        sys_enter_open_counter_map,
+        thread_switch_out_total_map,
+        thread_offcpu_total_ns_map,
+        thread_comm_map,
+    );
     let cpu_state = Arc::new(Mutex::new(cpu_state));
 
     let app = Router::new()
