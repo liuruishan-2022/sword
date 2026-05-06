@@ -1,72 +1,99 @@
-# 使用 Aya 编写 sys_enter_open 入门例子
+# 使用 Aya + Rust 开发 eBPF Tracepoint 入门
 
-本文基于本项目里的 `sword-ebpf/src/io/file.rs`，说明如何用 Aya 编写一个跟踪 `sys_enter_open` 的 eBPF 程序。目标不是一次讲完 eBPF，而是先建立一个能跑通的心智模型。
+本文介绍使用 Rust 和 Aya 开发一个 eBPF tracepoint 程序的基本流程。示例目标是观察进程打开文件时触发的内核事件：`syscalls:sys_enter_open`。
 
-## 1. eBPF 是什么
+参考资料：
 
-eBPF 可以理解为 Linux 内核提供的一套安全插件机制。我们可以把一小段程序加载到内核，在指定事件发生时执行，例如：
+- Aya 官方文档：https://aya-rs.dev/book/index.html
+- Aya 项目模板：https://github.com/aya-rs/aya-template
+- 本文示例项目：https://github.com/liuruishan-2022/open-trace/tree/learn-01
 
-- 系统调用进入时
-- 函数执行前后
-- 网络包进入网卡时
-- CPU 调度切换时
-- 文件读写发生时
+## 1. 开发前需要知道什么
 
-这些程序运行在内核里，但不能随便做危险操作。eBPF verifier 会在加载前检查程序，确保它不会越界访问、不会无限循环、不会破坏内核。
+eBPF 是 Linux 内核提供的一套可编程能力。开发者可以编写一小段程序，把它加载到内核中，并挂载到指定事件点上执行。它常用于系统观测、性能分析、网络处理和安全审计等场景。
 
-在本项目里，我们用 Rust + Aya 来写 eBPF 程序。Aya 做的事情主要是：
+从理解方式上看，eBPF 有点类似 Java 里的 AOP 思想：Java AOP 是在方法调用前后插入增强逻辑，eBPF 则是在内核事件发生时执行我们挂载上去的程序。比如本文的 `syscalls:sys_enter_open`，就是在进程进入 `open` 系统调用时触发我们编写的 eBPF 逻辑。
 
-- 在 eBPF 侧提供宏和类型，例如 `#[tracepoint]`、`TracePointContext`
-- 在用户态加载 eBPF 程序
-- 把 eBPF map 暴露给用户态读取
-- attach 到内核 tracepoint
+eBPF 程序不是直接随意运行在内核中的。加载时，内核会先通过 verifier 检查程序，确认它满足安全约束，例如不能无限循环、不能越界访问内存。检查通过后，程序才会被加载并执行。
 
-## 2. 用 Java AOP 来理解 eBPF tracepoint
+tracepoint 是内核已经定义好的事件点，适合入门学习，因为它的字段格式可以直接从系统文件中查看。本文使用 `syscalls:sys_enter_open` 作为示例，当进程进入 `open` 系统调用时，这个 tracepoint 会被触发。
 
-如果你熟悉 Java，可以把 eBPF tracepoint 类比成 Linux 内核里的 AOP。
+使用 Aya 开发时，通常会有两个 Rust 程序：
 
-在 Java 里，AOP 大概是这样：
-
-```java
-@Around("execution(* com.example.FileService.open(..))")
-public Object aroundOpen(ProceedingJoinPoint pjp) {
-    // 方法执行前采集参数
-    Object[] args = pjp.getArgs();
-
-    // 继续执行原方法
-    Object result = pjp.proceed();
-
-    // 方法执行后记录结果
-    return result;
-}
+```text
+open-trace-ebpf/  # eBPF 侧程序，编译后加载到内核执行
+open-trace/       # 用户态程序，负责加载、attach、输出日志
 ```
 
-对应到 eBPF tracepoint：
+eBPF 侧负责处理内核事件，用户态侧负责启动和管理 eBPF 程序。本文会按下面流程展开：
 
-| Java AOP | eBPF / Aya |
-| --- | --- |
-| Pointcut | tracepoint，例如 `syscalls:sys_enter_open` |
-| Advice | eBPF 程序，例如 `sys_enter_open(ctx)` |
-| JoinPoint | 内核事件发生点 |
-| 方法参数 | `TracePointContext` 里的字段 |
-| 共享状态 | eBPF map |
-| 日志/指标 | 用户态读取 map 或 eBPF log |
+```text
+准备环境 -> 创建项目 -> 查找 tracepoint -> 编写 eBPF 程序 -> 编写用户态加载逻辑 -> 运行验证
+```
 
-所以，`sys_enter_open` 可以理解为：
+## 2. 准备开发环境
 
-> 当任意进程进入 `open` 系统调用时，内核自动回调我们的 eBPF 函数。
+根据 Aya 官方文档，开发环境通常需要 Rust stable、Rust nightly、`rust-src`、`bpf-linker`、`cargo-generate` 和 `bpftool`。
 
-这和 Java AOP 最大的区别是：eBPF 的切点发生在 Linux 内核层，不是在 JVM 内部。
-
-## 3. sys_enter_open 的 tracepoint 格式
-
-要读取 tracepoint 参数，第一步是查看内核提供的 format：
+安装 Rust 工具链：
 
 ```bash
-cat /sys/kernel/debug/tracing/events/syscalls/sys_enter_open/format
+rustup install stable
+rustup toolchain install nightly --component rust-src
 ```
 
-本项目 `file.rs` 中记录的格式类似：
+安装项目生成工具和 eBPF linker：
+
+```bash
+cargo install cargo-generate
+cargo install bpf-linker
+```
+
+安装 `bpftool`：
+
+```bash
+sudo apt install bpftool
+```
+
+不同 Linux 发行版的包名可能不同。如果安装失败，需要根据当前系统查询对应包。
+
+## 3. 创建 Aya 项目
+
+Aya 官方推荐使用 `aya-template` 创建项目：
+
+```bash
+cargo generate https://github.com/aya-rs/aya-template
+```
+
+生成过程中选择项目名和 eBPF 程序类型。本文要开发 tracepoint，因此选择 tracepoint 类型。
+
+假设项目名为 `open-trace`，生成后会得到类似结构：
+
+```text
+open-trace/
+open-trace-ebpf/
+```
+
+其中：
+
+- `open-trace-ebpf`：编写 eBPF 侧代码。
+- `open-trace`：编写用户态加载程序。
+
+## 4. 查找 tracepoint 字段
+
+本文使用 `syscalls:sys_enter_open` 作为入口点。先查看系统是否存在这个 tracepoint：
+
+```bash
+sudo ls /sys/kernel/debug/tracing/events/syscalls/
+```
+
+查看字段格式：
+
+```bash
+sudo cat /sys/kernel/debug/tracing/events/syscalls/sys_enter_open/format
+```
+
+可以看到类似内容：
 
 ```text
 field:int __syscall_nr;         offset:8;  size:4;
@@ -75,274 +102,256 @@ field:int flags;                offset:24; size:8;
 field:umode_t mode;             offset:32; size:8;
 ```
 
-关键点：
+写 tracepoint 程序时，需要根据 `format` 文件里的 `offset` 和 `size` 读取字段。
 
-- `__syscall_nr` 在 offset `8`
-- `filename` 在 offset `16`
-- `flags` 在 offset `24`
-- `mode` 在 offset `32`
+这里会用到的字段是：
 
-这里最容易踩坑的是 `filename`。
+- `__syscall_nr`：offset `8`
+- `filename`：offset `16`
+- `flags`：offset `24`
+- `mode`：offset `32`
 
-`filename` 不是直接嵌在 tracepoint 数据里的字符串，而是一个用户空间地址：
+`filename` 的类型是 `const char *`，tracepoint 数据里保存的是用户空间地址。读取文件名时，需要先读取指针，再通过 eBPF helper 读取字符串内容。
 
-```text
-const char * filename
+如果 `/sys/kernel/debug/tracing` 不存在，可以先挂载 debugfs：
+
+```bash
+sudo mount -t debugfs none /sys/kernel/debug
 ```
 
-所以读取分两步：
+## 5. 编写 eBPF 侧程序
 
-1. 先从 tracepoint payload 里读取这个地址
-2. 再用 `bpf_probe_read_user_str_bytes` 从用户空间读取字符串内容
+tracepoint 程序使用 Aya 的 `#[tracepoint]` 宏，入口函数参数使用 `TracePointContext`。
 
-## 4. eBPF 侧代码结构
-
-本项目的代码在：
-
-```text
-sword-ebpf/src/io/file.rs
-```
-
-一个最小的 `sys_enter_open` tracepoint 程序结构如下：
+最小结构如下：
 
 ```rust
+#![no_std]
+#![no_main]
+
 use aya_ebpf::{
-    cty::c_long,
-    helpers::bpf_probe_read_user_str_bytes,
-    macros::{map, tracepoint},
-    maps::PerCpuArray,
+    macros::tracepoint,
     programs::TracePointContext,
 };
-use aya_log_ebpf::info;
-
-const LOG_BUF_CAPACITY: usize = 1024;
-
-#[repr(C)]
-pub struct Buf {
-    pub buf: [u8; LOG_BUF_CAPACITY],
-}
-
-#[map]
-pub static BUF: PerCpuArray<Buf> = PerCpuArray::with_max_entries(1, 0);
 
 #[tracepoint]
 pub fn sys_enter_open(ctx: TracePointContext) -> u32 {
     match try_sys_enter_open(ctx) {
-        Ok(ret) => ret as u32,
+        Ok(ret) => ret,
         Err(_) => 1,
     }
 }
+
+fn try_sys_enter_open(_ctx: TracePointContext) -> Result<u32, i64> {
+    Ok(0)
+}
+
+#[cfg(not(test))]
+#[panic_handler]
+fn panic(_info: &core::panic::PanicInfo) -> ! {
+    loop {}
+}
 ```
 
-这里有几个核心点。
+关键点：
 
-`#[tracepoint]` 表示这是一个 tracepoint 类型的 eBPF 程序。函数名 `sys_enter_open` 后面会在用户态 loader 里用到。
+- `#[tracepoint]` 标记这是一个 tracepoint 程序。
+- `sys_enter_open` 是 eBPF 程序名，用户态加载时会用到。
+- `TracePointContext` 用来读取 tracepoint 事件数据。
+- `try_sys_enter_open` 用来放实际处理逻辑。
 
-`TracePointContext` 是 Aya 提供的上下文对象，可以通过 offset 读取 tracepoint payload。
+## 6. 读取 tracepoint 参数
 
-`BUF` 是一个 `PerCpuArray`。它的作用是给每个 CPU 准备一块临时 buffer，用来读取用户空间字符串。eBPF 栈空间很小，不适合直接在栈上放很大的数组，所以这里用 map 来放 `1024` 字节 buffer。
-
-## 5. 读取普通字段
-
-普通整数字段可以直接用 `ctx.read_at`：
+普通字段可以使用 `ctx.read_at` 按 offset 读取：
 
 ```rust
-let syscall_nr = ctx.read_at::<u32>(8)?;
-let flags = ctx.read_at::<u64>(24)?;
-let mode = ctx.read_at::<u64>(32)?;
+fn try_sys_enter_open(ctx: TracePointContext) -> Result<u32, i64> {
+    let syscall_nr = unsafe { ctx.read_at::<u32>(8)? };
+    let flags = unsafe { ctx.read_at::<u64>(24)? };
+    let mode = unsafe { ctx.read_at::<u64>(32)? };
 
-info!(&ctx, "sys_enter_open syscall_nr: {}", syscall_nr);
-info!(&ctx, "flags: {}", flags);
-info!(&ctx, "mode: {} (0x{:x})", mode, mode);
+    let _ = syscall_nr;
+    let _ = flags;
+    let _ = mode;
+
+    Ok(0)
+}
 ```
 
-这里的 offset 来自 tracepoint format。
+读取时要让 Rust 类型和字段大小匹配：
 
-注意，`read_at::<T>(offset)` 里的 `T` 要和字段大小匹配。比如 offset `8` 的 `__syscall_nr` 是 4 字节，所以用 `u32` 或 `i32`；`flags` 和 `mode` 在当前 format 中 size 是 8，所以代码里用了 `u64`。
+- 4 字节字段可以用 `u32` 或 `i32`
+- 8 字节字段可以用 `u64` 或 `i64`
+- 指针在 64 位系统上通常按 8 字节读取
 
-## 6. 读取 filename 字符串
+## 7. 读取文件名并输出日志
 
-`filename` 是指针，所以不能这样读：
+`filename` 是用户空间指针，需要先读取指针值，再调用 helper 读取字符串。
 
-```rust
-let filename = ctx.read_at::<[u8; 256]>(16)?;
-```
-
-这是错的。offset `16` 位置放的是地址，不是字符串本体。
-
-正确方式：
+这个入门示例只读取文件名并打印日志，不需要定义 eBPF map。可以在栈上准备一个较小的临时 buffer：
 
 ```rust
-let filename_addr: u64 = ctx.read_at(16)?;
-let buf = {
-    let ptr = BUF.get_ptr_mut(0).ok_or(0)?;
-    &mut *ptr
+use aya_ebpf::{
+    helpers::bpf_probe_read_user_str_bytes,
+    macros::tracepoint,
+    programs::TracePointContext,
 };
+use aya_log_ebpf::info;
 
-let filename = {
-    let len = bpf_probe_read_user_str_bytes(filename_addr as *const u8, &mut buf.buf)?;
-    core::str::from_utf8_unchecked(len)
-};
+const BUF_SIZE: usize = 256;
 
-info!(&ctx, "sys_enter_open filename: {}", filename);
-```
+#[tracepoint]
+pub fn sys_enter_open(ctx: TracePointContext) -> u32 {
+    match try_sys_enter_open(ctx) {
+        Ok(ret) => ret,
+        Err(_) => 1,
+    }
+}
 
-这段代码可以拆开理解：
-
-- `ctx.read_at(16)`：读取 `filename` 指针值
-- `BUF.get_ptr_mut(0)`：拿到当前 CPU 对应的临时 buffer
-- `bpf_probe_read_user_str_bytes`：从用户空间地址读取 C 字符串
-- `from_utf8_unchecked`：把字节转成 `&str`
-
-在 eBPF 里经常会看到 `unsafe`，因为很多操作涉及裸指针、内核 helper、用户空间地址读取。这里的安全边界主要由 eBPF verifier 和 helper 函数保证。
-
-## 7. 完整 try_sys_enter_open 示例
-
-可以把 `try_sys_enter_open` 写成：
-
-```rust
-fn try_sys_enter_open(ctx: TracePointContext) -> Result<c_long, c_long> {
+fn try_sys_enter_open(ctx: TracePointContext) -> Result<u32, i64> {
     unsafe {
-        let syscall_nr = ctx.read_at::<u32>(8)?;
-        let flags = ctx.read_at::<u64>(24)?;
-        let mode = ctx.read_at::<u64>(32)?;
-
         let filename_addr: u64 = ctx.read_at(16)?;
-        let buf = {
-            let ptr = BUF.get_ptr_mut(0).ok_or(0)?;
-            &mut *ptr
-        };
+        let mut buf = [0u8; BUF_SIZE];
 
-        let filename = {
-            let len = bpf_probe_read_user_str_bytes(filename_addr as *const u8, &mut buf.buf)?;
-            core::str::from_utf8_unchecked(len)
-        };
+        let filename_bytes =
+            bpf_probe_read_user_str_bytes(filename_addr as *const u8, &mut buf)?;
+        let filename = core::str::from_utf8_unchecked(filename_bytes);
 
-        info!(
-            &ctx,
-            "sys_enter_open nr={} filename={} flags={} mode=0x{:x}",
-            syscall_nr,
-            filename,
-            flags,
-            mode
-        );
+        info!(&ctx, "open filename={}", filename);
     }
 
     Ok(0)
 }
 ```
 
-这个版本只是入门调试用。真实生产场景不建议对每次 `open` 都 `info!`，因为系统调用频率很高，日志输出会明显影响性能。
+代码执行流程：
 
-更适合生产的方式是：
+1. `ctx.read_at(16)` 读取 `filename` 指针。
+2. `let mut buf = [0u8; BUF_SIZE]` 准备临时 buffer。
+3. `bpf_probe_read_user_str_bytes` 从用户空间读取字符串。
+4. `info!` 把日志发送给用户态日志读取器。
 
-- eBPF 侧只做计数或采样
-- 用 map 聚合数据
-- 用户态定期读取 map
-- 暴露成 Prometheus 指标
+后续如果需要跨事件保存状态、向用户态传递统计数据、做计数聚合，或者需要更大的临时空间，可以再引入 `#[map]`。
 
-本项目的 `sched_switch` 指标已经采用了这种思路。
+## 8. 编写用户态加载逻辑
 
-## 8. 用户态加载程序
+eBPF 程序需要由用户态程序加载并 attach 到 tracepoint。
 
-用户态 loader 在：
-
-```text
-sword/src/loader/io.rs
-```
-
-加载 `sys_enter_open` 的代码是：
+核心逻辑如下：
 
 ```rust
 use aya::programs::TracePoint;
 
-pub fn load_sys_enter_open(ebpf: &mut aya::Ebpf) -> anyhow::Result<()> {
-    let program: &mut TracePoint = ebpf.program_mut("sys_enter_open").unwrap().try_into()?;
-    program.load()?;
-    program.attach("syscalls", "sys_enter_open")?;
-    Ok(())
-}
-```
+let program: &mut TracePoint =
+    bpf.program_mut("sys_enter_open").unwrap().try_into()?;
 
-这里的对应关系很重要：
-
-```rust
-ebpf.program_mut("sys_enter_open")
-```
-
-对应 eBPF 侧的函数名：
-
-```rust
-#[tracepoint]
-pub fn sys_enter_open(ctx: TracePointContext) -> u32
-```
-
-而：
-
-```rust
+program.load()?;
 program.attach("syscalls", "sys_enter_open")?;
 ```
 
-对应内核 tracepoint：
+这里需要保证两个名字一致：
+
+- `bpf.program_mut("sys_enter_open")` 对应 eBPF 侧函数名。
+- `program.attach("syscalls", "sys_enter_open")` 对应内核 tracepoint。
+
+完整 tracepoint 名可以理解为：
 
 ```text
-/sys/kernel/debug/tracing/events/syscalls/sys_enter_open
+syscalls:sys_enter_open
 ```
 
-也就是：
+## 9. 初始化 eBPF 日志
 
-```text
-category = syscalls
-name     = sys_enter_open
-```
-
-## 9. open 和 openat 的区别
-
-本项目里还有 `sys_enter_openat`。它和 `sys_enter_open` 的核心区别是参数布局不同。
-
-`sys_enter_open`：
-
-```text
-filename offset: 16
-flags    offset: 24
-mode     offset: 32
-```
-
-`sys_enter_openat`：
-
-```text
-dfd      offset: 16
-filename offset: 24
-flags    offset: 32
-mode     offset: 40
-```
-
-所以同样是读取 filename：
+eBPF 侧使用 `aya_log_ebpf::info!` 输出日志：
 
 ```rust
-// open
-let filename_addr: u64 = ctx.read_at(16)?;
+use aya_log_ebpf::info;
 
-// openat
-let filename_addr: u64 = ctx.read_at(24)?;
+info!(&ctx, "open filename={}", filename);
 ```
 
-这也是写 tracepoint 程序时最重要的习惯：不要凭感觉猜参数位置，要先看 `/sys/kernel/debug/tracing/events/.../format`。
+用户态需要初始化 `aya_log::EbpfLogger`：
 
-## 10. 小结
+```rust
+use aya_log::EbpfLogger;
+use log::warn;
 
-用 Aya 写一个 tracepoint 程序，可以按这个流程理解：
+match EbpfLogger::init(&mut bpf) {
+    Ok(logger) => {
+        // 在异步程序里通常需要把 logger 注册到 async runtime，
+        // 当 fd 可读时调用 flush()。
+    }
+    Err(e) => {
+        warn!("failed to initialize eBPF logger: {e}");
+    }
+}
+```
 
-1. 找到内核 tracepoint，例如 `syscalls:sys_enter_open`
-2. 查看 format，确认每个字段的 offset 和 size
-3. 在 eBPF 侧用 `#[tracepoint]` 编写处理函数
-4. 用 `TracePointContext::read_at` 读取普通字段
-5. 遇到用户空间指针，用 `bpf_probe_read_user_str_bytes` 读取真实内容
-6. 用户态用 Aya loader 加载并 attach 到对应 tracepoint
-7. 调试阶段可以用 `aya_log_ebpf::info!`
-8. 生产阶段优先使用 map 聚合，再由用户态暴露指标
+使用 Tokio 时，可以用 `tokio::io::unix::AsyncFd` 监听 logger，并在可读时调用 `flush()`。
 
-用 Java AOP 的话来概括：
+## 10. 编译和运行
 
-> eBPF tracepoint 就是在 Linux 内核事件上的 AOP。我们不是增强某个 Java 方法，而是在增强一个内核事件，比如系统调用进入、调度切换、网络收包。
+在项目根目录执行：
 
+```bash
+cargo build
+```
+
+运行 eBPF 程序通常需要 root 权限：
+
+```bash
+RUST_LOG=info cargo run --config 'target."cfg(all())".runner="sudo -E"'
+```
+
+也可以直接运行：
+
+```bash
+sudo -E RUST_LOG=info cargo run
+```
+
+程序启动后，另开一个终端触发文件打开：
+
+```bash
+cat /etc/hosts >/dev/null
+ls >/dev/null
+```
+
+如果 eBPF 侧已经写了 `info!`，用户态也正确初始化了 `EbpfLogger`，就可以在运行程序的终端看到类似日志：
+
+```text
+open filename=/etc/hosts
+```
+
+注意：`syscalls:sys_enter_open` 是系统级 tracepoint，不只会捕获你手动执行的 `cat` 或 `ls`，系统里其他进程打开文件时也会触发它。因此日志可能会非常多，入门调试时不一定容易分辨哪一条属于自己关注的进程。实际排查时可以先减少系统干扰，或者后续在 eBPF 侧增加 pid、进程名、路径前缀等过滤条件。
+
+## 11. 查看加载结果
+
+查看当前已加载的 eBPF 程序：
+
+```bash
+sudo bpftool prog list
+```
+
+查看当前已创建的 eBPF map：
+
+```bash
+sudo bpftool map list
+```
+
+如果程序加载失败，可以优先检查：
+
+- 是否使用 root 权限运行。
+- `syscalls:sys_enter_open` 是否存在。
+- `program.attach("syscalls", "sys_enter_open")` 的名字是否正确。
+- eBPF 日志初始化是否完成。
+- `RUST_LOG=info` 是否生效。
+
+## 小结
+
+Aya + Rust 开发 tracepoint 的入门流程可以概括为：
+
+```text
+创建项目 -> 查看 tracepoint format -> 编写 eBPF 函数 -> 用户态 load 和 attach -> 初始化日志 -> 运行验证
+```
+
+掌握这个流程后，就可以继续学习 eBPF map、perf event、ring buffer、kprobe、uprobes、XDP 等更完整的 eBPF 开发能力。

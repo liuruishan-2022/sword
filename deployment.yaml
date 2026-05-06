@@ -42,7 +42,7 @@ spec:
       serviceAccountName: sword-ebpf
       containers:
       - name: sword
-        image: xwharbor.wxchina.com/cpaas/component/sword:v0.1.0-0123311-keypad
+        image: xwharbor.wxchina.com/cpaas/component/sword:v0.1.0-964a84e45b
         imagePullPolicy: IfNotPresent
         securityContext:
           privileged: true
@@ -119,7 +119,7 @@ spec:
         kops.k8s.io/ebpf: enabled
       containers:
       - name: rust-mouse
-        image: xwharbor.wxchina.com/cpaas/component/rust-mouse:v0.1.0-e019df3ffe
+        image: xwharbor.wxchina.com/cpaas/component/rust-mouse:v0.1.0-964a84e45b
         imagePullPolicy: IfNotPresent
         args:
         - net-request
