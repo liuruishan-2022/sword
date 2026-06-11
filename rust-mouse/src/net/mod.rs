@@ -7,7 +7,7 @@ use tracing::{error, info, warn};
 
 #[derive(Debug, Clone)]
 pub struct RequestConfig {
-    pub url: String,
+    pub urls: Vec<String>,
     pub workers: usize,
     pub interval: Duration,
     pub timeout: Duration,
@@ -16,7 +16,10 @@ pub struct RequestConfig {
 impl Default for RequestConfig {
     fn default() -> Self {
         Self {
-            url: "https://www.baidu.com/".to_string(),
+            urls: vec![
+                "https://www.baidu.com/".to_string(),
+                "https://www.json.cn/".to_string(),
+            ],
             workers: 1,
             interval: Duration::from_secs(1),
             timeout: Duration::from_secs(5),
@@ -27,7 +30,7 @@ impl Default for RequestConfig {
 pub fn start_request_load(config: RequestConfig) {
     let workers = config.workers.max(1);
     info!(
-        url = config.url,
+        urls = ?config.urls,
         workers,
         interval_ms = config.interval.as_millis(),
         timeout_ms = config.timeout.as_millis(),
@@ -57,27 +60,31 @@ fn run_request_worker(worker_id: usize, config: RequestConfig) {
     };
 
     loop {
-        let started = Instant::now();
-        match client.get(&config.url).send() {
-            Ok(response) => {
-                let status = response.status().as_u16();
-                let elapsed = started.elapsed();
-                info!(
-                    worker_id,
-                    status,
-                    elapsed_ms = elapsed.as_millis(),
-                    "http request completed"
-                );
-            }
-            Err(err) => {
-                let elapsed = started.elapsed();
-                warn!(
-                    worker_id,
-                    elapsed_ms = elapsed.as_millis(),
-                    error = %err,
-                    error_debug = ?err,
-                    "http request failed"
-                );
+        for url in &config.urls {
+            let started = Instant::now();
+            match client.get(url).send() {
+                Ok(response) => {
+                    let status = response.status().as_u16();
+                    let elapsed = started.elapsed();
+                    info!(
+                        worker_id,
+                        url,
+                        status,
+                        elapsed_ms = elapsed.as_millis(),
+                        "http request completed"
+                    );
+                }
+                Err(err) => {
+                    let elapsed = started.elapsed();
+                    warn!(
+                        worker_id,
+                        url,
+                        elapsed_ms = elapsed.as_millis(),
+                        error = %err,
+                        error_debug = ?err,
+                        "http request failed"
+                    );
+                }
             }
         }
 

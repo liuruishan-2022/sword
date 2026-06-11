@@ -30,7 +30,12 @@ async fn main() {
         Some("net-request") => {
             let mut config = net::RequestConfig::default();
             if let Some(url) = args.get(2) {
-                config.url = url.clone();
+                config.urls = url
+                    .split(',')
+                    .map(str::trim)
+                    .filter(|url| !url.is_empty())
+                    .map(ToString::to_string)
+                    .collect();
             }
             if let Some(workers) = args.get(3).and_then(|value| value.parse::<usize>().ok()) {
                 config.workers = workers;

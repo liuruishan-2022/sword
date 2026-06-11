@@ -8,6 +8,7 @@ pub mod metrics;
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+    let options = loader::LoaderOptions::parse_args()?;
 
     let rlim = libc::rlimit {
         rlim_cur: libc::RLIM_INFINITY,
@@ -40,7 +41,7 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
-    loader::load_ebpf(&mut ebpf)?;
+    loader::load_ebpf(&mut ebpf, &options)?;
     metrics::spawn_prometheus_exporter(&mut ebpf).await?;
 
     let ctrl_c = signal::ctrl_c();
