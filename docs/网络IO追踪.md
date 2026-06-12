@@ -203,8 +203,8 @@ sudo bpftrace -l | grep 'tracepoint:sock:inet_sock_set_state'
 当前项目可以先实现最小闭环：
 
 - eBPF：`kprobe:tcp_sendmsg`
-- 参数：`--tcp-sendmsg-comm COMM`，指定要跟踪的进程 `comm`
-- map：`TCP_SENDMSG_TARGET`，保存用户态传入的目标 `comm`
+- 参数：`--tcp-sendmsg-pid PID`，指定要跟踪的进程 ID
+- map：`TCP_SENDMSG_TARGET`，保存用户态传入的目标 PID
 - map：`TCP_SENDMSG_TOTAL`，累计调用次数
 - map：`TCP_SENDMSG_BYTES_TOTAL`，累计发送字节数
 - 用户态：挂载 `tcp_sendmsg`
@@ -213,12 +213,15 @@ sudo bpftrace -l | grep 'tracepoint:sock:inet_sock_set_state'
 运行示例：
 
 ```bash
-RUST_LOG=info cargo run -- --tcp-sendmsg-comm rust-mouse
+RUST_LOG=info cargo run -- --tcp-sendmsg-pid 12345
 ```
+
+通过参数配置 PID、写入 eBPF map、再由内核态 kprobe 读取配置并过滤的完整流程，见
+[`kprobe_tcp_sendmsg_pid_filter.md`](./kprobe_tcp_sendmsg_pid_filter.md)。
 
 后续再扩展：
 
-- 增加 `pid` 维度，支持按具体进程 ID 过滤。
+- 支持多个 PID 或运行时更新 PID 过滤配置。
 - 解析 `struct sock`，加入五元组维度。
 - 增加 `tcp_cleanup_rbuf`，补接收方向。
 - 增加 `inet_sock_set_state`，补连接生命周期。
