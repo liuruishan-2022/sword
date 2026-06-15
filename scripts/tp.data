@@ -1,0 +1,2279 @@
+==========================================
+文件状态与属性
+==========================================
+>>> sys_enter_stat
+  Tracepoint not found
+
+>>> sys_exit_stat
+  Tracepoint not found
+
+>>> sys_enter_fstat
+  Tracepoint not found
+
+>>> sys_exit_fstat
+  Tracepoint not found
+
+>>> sys_enter_lstat
+  Tracepoint not found
+
+>>> sys_exit_lstat
+  Tracepoint not found
+
+>>> sys_enter_newfstatat
+name: sys_enter_newfstatat
+ID: 774
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:int dfd;	offset:16;	size:8;	signed:0;
+	field:const char * filename;	offset:24;	size:8;	signed:0;
+	field:struct stat * statbuf;	offset:32;	size:8;	signed:0;
+	field:int flag;	offset:40;	size:8;	signed:0;
+
+print fmt: "dfd: 0x%08lx, filename: 0x%08lx, statbuf: 0x%08lx, flag: 0x%08lx", ((unsigned long)(REC->dfd)), ((unsigned long)(REC->filename)), ((unsigned long)(REC->statbuf)), ((unsigned long)(REC->flag))
+
+>>> sys_exit_newfstatat
+name: sys_exit_newfstatat
+ID: 773
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:long ret;	offset:16;	size:8;	signed:1;
+
+print fmt: "0x%lx", REC->ret
+
+>>> sys_enter_statx
+name: sys_enter_statx
+ID: 766
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:int dfd;	offset:16;	size:8;	signed:0;
+	field:const char * filename;	offset:24;	size:8;	signed:0;
+	field:unsigned flags;	offset:32;	size:8;	signed:0;
+	field:unsigned int mask;	offset:40;	size:8;	signed:0;
+	field:struct statx * buffer;	offset:48;	size:8;	signed:0;
+
+print fmt: "dfd: 0x%08lx, filename: 0x%08lx, flags: 0x%08lx, mask: 0x%08lx, buffer: 0x%08lx", ((unsigned long)(REC->dfd)), ((unsigned long)(REC->filename)), ((unsigned long)(REC->flags)), ((unsigned long)(REC->mask)), ((unsigned long)(REC->buffer))
+
+>>> sys_exit_statx
+name: sys_exit_statx
+ID: 765
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:long ret;	offset:16;	size:8;	signed:1;
+
+print fmt: "0x%lx", REC->ret
+
+>>> sys_enter_chmod
+name: sys_enter_chmod
+ID: 714
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:const char * filename;	offset:16;	size:8;	signed:0;
+	field:umode_t mode;	offset:24;	size:8;	signed:0;
+
+print fmt: "filename: 0x%08lx, mode: 0x%08lx", ((unsigned long)(REC->filename)), ((unsigned long)(REC->mode))
+
+>>> sys_exit_chmod
+name: sys_exit_chmod
+ID: 713
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:long ret;	offset:16;	size:8;	signed:1;
+
+print fmt: "0x%lx", REC->ret
+
+>>> sys_enter_fchmod
+name: sys_enter_fchmod
+ID: 720
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:unsigned int fd;	offset:16;	size:8;	signed:0;
+	field:umode_t mode;	offset:24;	size:8;	signed:0;
+
+print fmt: "fd: 0x%08lx, mode: 0x%08lx", ((unsigned long)(REC->fd)), ((unsigned long)(REC->mode))
+
+>>> sys_exit_fchmod
+name: sys_exit_fchmod
+ID: 719
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:long ret;	offset:16;	size:8;	signed:1;
+
+print fmt: "0x%lx", REC->ret
+
+>>> sys_enter_fchmodat
+name: sys_enter_fchmodat
+ID: 716
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:int dfd;	offset:16;	size:8;	signed:0;
+	field:const char * filename;	offset:24;	size:8;	signed:0;
+	field:umode_t mode;	offset:32;	size:8;	signed:0;
+
+print fmt: "dfd: 0x%08lx, filename: 0x%08lx, mode: 0x%08lx", ((unsigned long)(REC->dfd)), ((unsigned long)(REC->filename)), ((unsigned long)(REC->mode))
+
+>>> sys_exit_fchmodat
+name: sys_exit_fchmodat
+ID: 715
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:long ret;	offset:16;	size:8;	signed:1;
+
+print fmt: "0x%lx", REC->ret
+
+>>> sys_enter_chown
+name: sys_enter_chown
+ID: 710
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:const char * filename;	offset:16;	size:8;	signed:0;
+	field:uid_t user;	offset:24;	size:8;	signed:0;
+	field:gid_t group;	offset:32;	size:8;	signed:0;
+
+print fmt: "filename: 0x%08lx, user: 0x%08lx, group: 0x%08lx", ((unsigned long)(REC->filename)), ((unsigned long)(REC->user)), ((unsigned long)(REC->group))
+
+>>> sys_exit_chown
+name: sys_exit_chown
+ID: 709
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:long ret;	offset:16;	size:8;	signed:1;
+
+print fmt: "0x%lx", REC->ret
+
+>>> sys_enter_fchown
+name: sys_enter_fchown
+ID: 706
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:unsigned int fd;	offset:16;	size:8;	signed:0;
+	field:uid_t user;	offset:24;	size:8;	signed:0;
+	field:gid_t group;	offset:32;	size:8;	signed:0;
+
+print fmt: "fd: 0x%08lx, user: 0x%08lx, group: 0x%08lx", ((unsigned long)(REC->fd)), ((unsigned long)(REC->user)), ((unsigned long)(REC->group))
+
+>>> sys_exit_fchown
+name: sys_exit_fchown
+ID: 705
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:long ret;	offset:16;	size:8;	signed:1;
+
+print fmt: "0x%lx", REC->ret
+
+>>> sys_enter_fchownat
+name: sys_enter_fchownat
+ID: 712
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:int dfd;	offset:16;	size:8;	signed:0;
+	field:const char * filename;	offset:24;	size:8;	signed:0;
+	field:uid_t user;	offset:32;	size:8;	signed:0;
+	field:gid_t group;	offset:40;	size:8;	signed:0;
+	field:int flag;	offset:48;	size:8;	signed:0;
+
+print fmt: "dfd: 0x%08lx, filename: 0x%08lx, user: 0x%08lx, group: 0x%08lx, flag: 0x%08lx", ((unsigned long)(REC->dfd)), ((unsigned long)(REC->filename)), ((unsigned long)(REC->user)), ((unsigned long)(REC->group)), ((unsigned long)(REC->flag))
+
+>>> sys_exit_fchownat
+name: sys_exit_fchownat
+ID: 711
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:long ret;	offset:16;	size:8;	signed:1;
+
+print fmt: "0x%lx", REC->ret
+
+>>> sys_enter_lchown
+name: sys_enter_lchown
+ID: 708
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:const char * filename;	offset:16;	size:8;	signed:0;
+	field:uid_t user;	offset:24;	size:8;	signed:0;
+	field:gid_t group;	offset:32;	size:8;	signed:0;
+
+print fmt: "filename: 0x%08lx, user: 0x%08lx, group: 0x%08lx", ((unsigned long)(REC->filename)), ((unsigned long)(REC->user)), ((unsigned long)(REC->group))
+
+>>> sys_exit_lchown
+name: sys_exit_lchown
+ID: 707
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:long ret;	offset:16;	size:8;	signed:1;
+
+print fmt: "0x%lx", REC->ret
+
+>>> sys_enter_utime
+name: sys_enter_utime
+ID: 930
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:char * filename;	offset:16;	size:8;	signed:0;
+	field:struct utimbuf * times;	offset:24;	size:8;	signed:0;
+
+print fmt: "filename: 0x%08lx, times: 0x%08lx", ((unsigned long)(REC->filename)), ((unsigned long)(REC->times))
+
+>>> sys_exit_utime
+name: sys_exit_utime
+ID: 929
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:long ret;	offset:16;	size:8;	signed:1;
+
+print fmt: "0x%lx", REC->ret
+
+>>> sys_enter_utimensat
+name: sys_enter_utimensat
+ID: 936
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:int dfd;	offset:16;	size:8;	signed:0;
+	field:const char * filename;	offset:24;	size:8;	signed:0;
+	field:struct __kernel_timespec * utimes;	offset:32;	size:8;	signed:0;
+	field:int flags;	offset:40;	size:8;	signed:0;
+
+print fmt: "dfd: 0x%08lx, filename: 0x%08lx, utimes: 0x%08lx, flags: 0x%08lx", ((unsigned long)(REC->dfd)), ((unsigned long)(REC->filename)), ((unsigned long)(REC->utimes)), ((unsigned long)(REC->flags))
+
+>>> sys_exit_utimensat
+name: sys_exit_utimensat
+ID: 935
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:long ret;	offset:16;	size:8;	signed:1;
+
+print fmt: "0x%lx", REC->ret
+
+>>> sys_enter_futimesat
+name: sys_enter_futimesat
+ID: 934
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:int dfd;	offset:16;	size:8;	signed:0;
+	field:const char * filename;	offset:24;	size:8;	signed:0;
+	field:struct __kernel_old_timeval * utimes;	offset:32;	size:8;	signed:0;
+
+print fmt: "dfd: 0x%08lx, filename: 0x%08lx, utimes: 0x%08lx", ((unsigned long)(REC->dfd)), ((unsigned long)(REC->filename)), ((unsigned long)(REC->utimes))
+
+>>> sys_exit_futimesat
+name: sys_exit_futimesat
+ID: 933
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:long ret;	offset:16;	size:8;	signed:1;
+
+print fmt: "0x%lx", REC->ret
+
+==========================================
+目录操作
+==========================================
+>>> sys_enter_mkdir
+name: sys_enter_mkdir
+ID: 808
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:const char * pathname;	offset:16;	size:8;	signed:0;
+	field:umode_t mode;	offset:24;	size:8;	signed:0;
+
+print fmt: "pathname: 0x%08lx, mode: 0x%08lx", ((unsigned long)(REC->pathname)), ((unsigned long)(REC->mode))
+
+>>> sys_exit_mkdir
+name: sys_exit_mkdir
+ID: 807
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:long ret;	offset:16;	size:8;	signed:1;
+
+print fmt: "0x%lx", REC->ret
+
+>>> sys_enter_mkdirat
+name: sys_enter_mkdirat
+ID: 810
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:int dfd;	offset:16;	size:8;	signed:0;
+	field:const char * pathname;	offset:24;	size:8;	signed:0;
+	field:umode_t mode;	offset:32;	size:8;	signed:0;
+
+print fmt: "dfd: 0x%08lx, pathname: 0x%08lx, mode: 0x%08lx", ((unsigned long)(REC->dfd)), ((unsigned long)(REC->pathname)), ((unsigned long)(REC->mode))
+
+>>> sys_exit_mkdirat
+name: sys_exit_mkdirat
+ID: 809
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:long ret;	offset:16;	size:8;	signed:1;
+
+print fmt: "0x%lx", REC->ret
+
+>>> sys_enter_rmdir
+name: sys_enter_rmdir
+ID: 806
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:const char * pathname;	offset:16;	size:8;	signed:0;
+
+print fmt: "pathname: 0x%08lx", ((unsigned long)(REC->pathname))
+
+>>> sys_exit_rmdir
+name: sys_exit_rmdir
+ID: 805
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:long ret;	offset:16;	size:8;	signed:1;
+
+print fmt: "0x%lx", REC->ret
+
+>>> sys_enter_getdents
+name: sys_enter_getdents
+ID: 822
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:unsigned int fd;	offset:16;	size:8;	signed:0;
+	field:struct linux_dirent * dirent;	offset:24;	size:8;	signed:0;
+	field:unsigned int count;	offset:32;	size:8;	signed:0;
+
+print fmt: "fd: 0x%08lx, dirent: 0x%08lx, count: 0x%08lx", ((unsigned long)(REC->fd)), ((unsigned long)(REC->dirent)), ((unsigned long)(REC->count))
+
+>>> sys_exit_getdents
+name: sys_exit_getdents
+ID: 821
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:long ret;	offset:16;	size:8;	signed:1;
+
+print fmt: "0x%lx", REC->ret
+
+>>> sys_enter_getdents64
+name: sys_enter_getdents64
+ID: 820
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:unsigned int fd;	offset:16;	size:8;	signed:0;
+	field:struct linux_dirent64 * dirent;	offset:24;	size:8;	signed:0;
+	field:unsigned int count;	offset:32;	size:8;	signed:0;
+
+print fmt: "fd: 0x%08lx, dirent: 0x%08lx, count: 0x%08lx", ((unsigned long)(REC->fd)), ((unsigned long)(REC->dirent)), ((unsigned long)(REC->count))
+
+>>> sys_exit_getdents64
+name: sys_exit_getdents64
+ID: 819
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:long ret;	offset:16;	size:8;	signed:1;
+
+print fmt: "0x%lx", REC->ret
+
+==========================================
+链接操作
+==========================================
+>>> sys_enter_link
+name: sys_enter_link
+ID: 794
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:const char * oldname;	offset:16;	size:8;	signed:0;
+	field:const char * newname;	offset:24;	size:8;	signed:0;
+
+print fmt: "oldname: 0x%08lx, newname: 0x%08lx", ((unsigned long)(REC->oldname)), ((unsigned long)(REC->newname))
+
+>>> sys_exit_link
+name: sys_exit_link
+ID: 793
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:long ret;	offset:16;	size:8;	signed:1;
+
+print fmt: "0x%lx", REC->ret
+
+>>> sys_enter_linkat
+name: sys_enter_linkat
+ID: 796
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:int olddfd;	offset:16;	size:8;	signed:0;
+	field:const char * oldname;	offset:24;	size:8;	signed:0;
+	field:int newdfd;	offset:32;	size:8;	signed:0;
+	field:const char * newname;	offset:40;	size:8;	signed:0;
+	field:int flags;	offset:48;	size:8;	signed:0;
+
+print fmt: "olddfd: 0x%08lx, oldname: 0x%08lx, newdfd: 0x%08lx, newname: 0x%08lx, flags: 0x%08lx", ((unsigned long)(REC->olddfd)), ((unsigned long)(REC->oldname)), ((unsigned long)(REC->newdfd)), ((unsigned long)(REC->newname)), ((unsigned long)(REC->flags))
+
+>>> sys_exit_linkat
+name: sys_exit_linkat
+ID: 795
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:long ret;	offset:16;	size:8;	signed:1;
+
+print fmt: "0x%lx", REC->ret
+
+>>> sys_enter_unlink
+name: sys_enter_unlink
+ID: 802
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:const char * pathname;	offset:16;	size:8;	signed:0;
+
+print fmt: "pathname: 0x%08lx", ((unsigned long)(REC->pathname))
+
+>>> sys_exit_unlink
+name: sys_exit_unlink
+ID: 801
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:long ret;	offset:16;	size:8;	signed:1;
+
+print fmt: "0x%lx", REC->ret
+
+>>> sys_enter_unlinkat
+name: sys_enter_unlinkat
+ID: 804
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:int dfd;	offset:16;	size:8;	signed:0;
+	field:const char * pathname;	offset:24;	size:8;	signed:0;
+	field:int flag;	offset:32;	size:8;	signed:0;
+
+print fmt: "dfd: 0x%08lx, pathname: 0x%08lx, flag: 0x%08lx", ((unsigned long)(REC->dfd)), ((unsigned long)(REC->pathname)), ((unsigned long)(REC->flag))
+
+>>> sys_exit_unlinkat
+name: sys_exit_unlinkat
+ID: 803
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:long ret;	offset:16;	size:8;	signed:1;
+
+print fmt: "0x%lx", REC->ret
+
+>>> sys_enter_symlink
+name: sys_enter_symlink
+ID: 798
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:const char * oldname;	offset:16;	size:8;	signed:0;
+	field:const char * newname;	offset:24;	size:8;	signed:0;
+
+print fmt: "oldname: 0x%08lx, newname: 0x%08lx", ((unsigned long)(REC->oldname)), ((unsigned long)(REC->newname))
+
+>>> sys_exit_symlink
+name: sys_exit_symlink
+ID: 797
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:long ret;	offset:16;	size:8;	signed:1;
+
+print fmt: "0x%lx", REC->ret
+
+>>> sys_enter_symlinkat
+name: sys_enter_symlinkat
+ID: 800
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:const char * oldname;	offset:16;	size:8;	signed:0;
+	field:int newdfd;	offset:24;	size:8;	signed:0;
+	field:const char * newname;	offset:32;	size:8;	signed:0;
+
+print fmt: "oldname: 0x%08lx, newdfd: 0x%08lx, newname: 0x%08lx", ((unsigned long)(REC->oldname)), ((unsigned long)(REC->newdfd)), ((unsigned long)(REC->newname))
+
+>>> sys_exit_symlinkat
+name: sys_exit_symlinkat
+ID: 799
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:long ret;	offset:16;	size:8;	signed:1;
+
+print fmt: "0x%lx", REC->ret
+
+>>> sys_enter_readlink
+name: sys_enter_readlink
+ID: 768
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:const char * path;	offset:16;	size:8;	signed:0;
+	field:char * buf;	offset:24;	size:8;	signed:0;
+	field:int bufsiz;	offset:32;	size:8;	signed:0;
+
+print fmt: "path: 0x%08lx, buf: 0x%08lx, bufsiz: 0x%08lx", ((unsigned long)(REC->path)), ((unsigned long)(REC->buf)), ((unsigned long)(REC->bufsiz))
+
+>>> sys_exit_readlink
+name: sys_exit_readlink
+ID: 767
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:long ret;	offset:16;	size:8;	signed:1;
+
+print fmt: "0x%lx", REC->ret
+
+>>> sys_enter_readlinkat
+name: sys_enter_readlinkat
+ID: 770
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:int dfd;	offset:16;	size:8;	signed:0;
+	field:const char * pathname;	offset:24;	size:8;	signed:0;
+	field:char * buf;	offset:32;	size:8;	signed:0;
+	field:int bufsiz;	offset:40;	size:8;	signed:0;
+
+print fmt: "dfd: 0x%08lx, pathname: 0x%08lx, buf: 0x%08lx, bufsiz: 0x%08lx", ((unsigned long)(REC->dfd)), ((unsigned long)(REC->pathname)), ((unsigned long)(REC->buf)), ((unsigned long)(REC->bufsiz))
+
+>>> sys_exit_readlinkat
+name: sys_exit_readlinkat
+ID: 769
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:long ret;	offset:16;	size:8;	signed:1;
+
+print fmt: "0x%lx", REC->ret
+
+==========================================
+文件重命名与移动
+==========================================
+>>> sys_enter_rename
+name: sys_enter_rename
+ID: 788
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:const char * oldname;	offset:16;	size:8;	signed:0;
+	field:const char * newname;	offset:24;	size:8;	signed:0;
+
+print fmt: "oldname: 0x%08lx, newname: 0x%08lx", ((unsigned long)(REC->oldname)), ((unsigned long)(REC->newname))
+
+>>> sys_exit_rename
+name: sys_exit_rename
+ID: 787
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:long ret;	offset:16;	size:8;	signed:1;
+
+print fmt: "0x%lx", REC->ret
+
+>>> sys_enter_renameat
+name: sys_enter_renameat
+ID: 790
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:int olddfd;	offset:16;	size:8;	signed:0;
+	field:const char * oldname;	offset:24;	size:8;	signed:0;
+	field:int newdfd;	offset:32;	size:8;	signed:0;
+	field:const char * newname;	offset:40;	size:8;	signed:0;
+
+print fmt: "olddfd: 0x%08lx, oldname: 0x%08lx, newdfd: 0x%08lx, newname: 0x%08lx", ((unsigned long)(REC->olddfd)), ((unsigned long)(REC->oldname)), ((unsigned long)(REC->newdfd)), ((unsigned long)(REC->newname))
+
+>>> sys_exit_renameat
+name: sys_exit_renameat
+ID: 789
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:long ret;	offset:16;	size:8;	signed:1;
+
+print fmt: "0x%lx", REC->ret
+
+>>> sys_enter_renameat2
+name: sys_enter_renameat2
+ID: 792
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:int olddfd;	offset:16;	size:8;	signed:0;
+	field:const char * oldname;	offset:24;	size:8;	signed:0;
+	field:int newdfd;	offset:32;	size:8;	signed:0;
+	field:const char * newname;	offset:40;	size:8;	signed:0;
+	field:unsigned int flags;	offset:48;	size:8;	signed:0;
+
+print fmt: "olddfd: 0x%08lx, oldname: 0x%08lx, newdfd: 0x%08lx, newname: 0x%08lx, flags: 0x%08lx", ((unsigned long)(REC->olddfd)), ((unsigned long)(REC->oldname)), ((unsigned long)(REC->newdfd)), ((unsigned long)(REC->newname)), ((unsigned long)(REC->flags))
+
+>>> sys_exit_renameat2
+name: sys_exit_renameat2
+ID: 791
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:long ret;	offset:16;	size:8;	signed:1;
+
+print fmt: "0x%lx", REC->ret
+
+==========================================
+文件截断与分配
+==========================================
+>>> sys_enter_truncate
+name: sys_enter_truncate
+ID: 738
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:const char * path;	offset:16;	size:8;	signed:0;
+	field:long length;	offset:24;	size:8;	signed:0;
+
+print fmt: "path: 0x%08lx, length: 0x%08lx", ((unsigned long)(REC->path)), ((unsigned long)(REC->length))
+
+>>> sys_exit_truncate
+name: sys_exit_truncate
+ID: 737
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:long ret;	offset:16;	size:8;	signed:1;
+
+print fmt: "0x%lx", REC->ret
+
+>>> sys_enter_ftruncate
+name: sys_enter_ftruncate
+ID: 736
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:unsigned int fd;	offset:16;	size:8;	signed:0;
+	field:off_t length;	offset:24;	size:8;	signed:0;
+
+print fmt: "fd: 0x%08lx, length: 0x%08lx", ((unsigned long)(REC->fd)), ((unsigned long)(REC->length))
+
+>>> sys_exit_ftruncate
+name: sys_exit_ftruncate
+ID: 735
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:long ret;	offset:16;	size:8;	signed:1;
+
+print fmt: "0x%lx", REC->ret
+
+>>> sys_enter_fallocate
+name: sys_enter_fallocate
+ID: 734
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:int fd;	offset:16;	size:8;	signed:0;
+	field:int mode;	offset:24;	size:8;	signed:0;
+	field:loff_t offset;	offset:32;	size:8;	signed:0;
+	field:loff_t len;	offset:40;	size:8;	signed:0;
+
+print fmt: "fd: 0x%08lx, mode: 0x%08lx, offset: 0x%08lx, len: 0x%08lx", ((unsigned long)(REC->fd)), ((unsigned long)(REC->mode)), ((unsigned long)(REC->offset)), ((unsigned long)(REC->len))
+
+>>> sys_exit_fallocate
+name: sys_exit_fallocate
+ID: 733
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:long ret;	offset:16;	size:8;	signed:1;
+
+print fmt: "0x%lx", REC->ret
+
+==========================================
+文件同步
+==========================================
+>>> sys_enter_fsync
+name: sys_enter_fsync
+ID: 924
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:unsigned int fd;	offset:16;	size:8;	signed:0;
+
+print fmt: "fd: 0x%08lx", ((unsigned long)(REC->fd))
+
+>>> sys_exit_fsync
+name: sys_exit_fsync
+ID: 923
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:long ret;	offset:16;	size:8;	signed:1;
+
+print fmt: "0x%lx", REC->ret
+
+>>> sys_enter_fdatasync
+name: sys_enter_fdatasync
+ID: 922
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:unsigned int fd;	offset:16;	size:8;	signed:0;
+
+print fmt: "fd: 0x%08lx", ((unsigned long)(REC->fd))
+
+>>> sys_exit_fdatasync
+name: sys_exit_fdatasync
+ID: 921
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:long ret;	offset:16;	size:8;	signed:1;
+
+print fmt: "0x%lx", REC->ret
+
+>>> sys_enter_sync
+name: sys_enter_sync
+ID: 928
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+
+print fmt: ""
+
+>>> sys_exit_sync
+name: sys_exit_sync
+ID: 927
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:long ret;	offset:16;	size:8;	signed:1;
+
+print fmt: "0x%lx", REC->ret
+
+>>> sys_enter_syncfs
+name: sys_enter_syncfs
+ID: 926
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:int fd;	offset:16;	size:8;	signed:0;
+
+print fmt: "fd: 0x%08lx", ((unsigned long)(REC->fd))
+
+>>> sys_exit_syncfs
+name: sys_exit_syncfs
+ID: 925
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:long ret;	offset:16;	size:8;	signed:1;
+
+print fmt: "0x%lx", REC->ret
+
+>>> sys_enter_sync_file_range
+name: sys_enter_sync_file_range
+ID: 920
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:int fd;	offset:16;	size:8;	signed:0;
+	field:loff_t offset;	offset:24;	size:8;	signed:0;
+	field:loff_t nbytes;	offset:32;	size:8;	signed:0;
+	field:unsigned int flags;	offset:40;	size:8;	signed:0;
+
+print fmt: "fd: 0x%08lx, offset: 0x%08lx, nbytes: 0x%08lx, flags: 0x%08lx", ((unsigned long)(REC->fd)), ((unsigned long)(REC->offset)), ((unsigned long)(REC->nbytes)), ((unsigned long)(REC->flags))
+
+>>> sys_exit_sync_file_range
+name: sys_exit_sync_file_range
+ID: 919
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:long ret;	offset:16;	size:8;	signed:1;
+
+print fmt: "0x%lx", REC->ret
+
+==========================================
+文件系统挂载
+==========================================
+>>> sys_enter_mount
+name: sys_enter_mount
+ID: 852
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:char * dev_name;	offset:16;	size:8;	signed:0;
+	field:char * dir_name;	offset:24;	size:8;	signed:0;
+	field:char * type;	offset:32;	size:8;	signed:0;
+	field:unsigned long flags;	offset:40;	size:8;	signed:0;
+	field:void * data;	offset:48;	size:8;	signed:0;
+
+print fmt: "dev_name: 0x%08lx, dir_name: 0x%08lx, type: 0x%08lx, flags: 0x%08lx, data: 0x%08lx", ((unsigned long)(REC->dev_name)), ((unsigned long)(REC->dir_name)), ((unsigned long)(REC->type)), ((unsigned long)(REC->flags)), ((unsigned long)(REC->data))
+
+>>> sys_exit_mount
+name: sys_exit_mount
+ID: 851
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:long ret;	offset:16;	size:8;	signed:1;
+
+print fmt: "0x%lx", REC->ret
+
+>>> sys_enter_mount_setattr
+name: sys_enter_mount_setattr
+ID: 844
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:int dfd;	offset:16;	size:8;	signed:0;
+	field:const char * path;	offset:24;	size:8;	signed:0;
+	field:unsigned int flags;	offset:32;	size:8;	signed:0;
+	field:struct mount_attr * uattr;	offset:40;	size:8;	signed:0;
+	field:size_t usize;	offset:48;	size:8;	signed:0;
+
+print fmt: "dfd: 0x%08lx, path: 0x%08lx, flags: 0x%08lx, uattr: 0x%08lx, usize: 0x%08lx", ((unsigned long)(REC->dfd)), ((unsigned long)(REC->path)), ((unsigned long)(REC->flags)), ((unsigned long)(REC->uattr)), ((unsigned long)(REC->usize))
+
+>>> sys_exit_mount_setattr
+name: sys_exit_mount_setattr
+ID: 843
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:long ret;	offset:16;	size:8;	signed:1;
+
+print fmt: "0x%lx", REC->ret
+
+>>> sys_enter_move_mount
+name: sys_enter_move_mount
+ID: 848
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:int from_dfd;	offset:16;	size:8;	signed:0;
+	field:const char * from_pathname;	offset:24;	size:8;	signed:0;
+	field:int to_dfd;	offset:32;	size:8;	signed:0;
+	field:const char * to_pathname;	offset:40;	size:8;	signed:0;
+	field:unsigned int flags;	offset:48;	size:8;	signed:0;
+
+print fmt: "from_dfd: 0x%08lx, from_pathname: 0x%08lx, to_dfd: 0x%08lx, to_pathname: 0x%08lx, flags: 0x%08lx", ((unsigned long)(REC->from_dfd)), ((unsigned long)(REC->from_pathname)), ((unsigned long)(REC->to_dfd)), ((unsigned long)(REC->to_pathname)), ((unsigned long)(REC->flags))
+
+>>> sys_exit_move_mount
+name: sys_exit_move_mount
+ID: 847
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:long ret;	offset:16;	size:8;	signed:1;
+
+print fmt: "0x%lx", REC->ret
+
+>>> sys_enter_umount
+name: sys_enter_umount
+ID: 856
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:char * name;	offset:16;	size:8;	signed:0;
+	field:int flags;	offset:24;	size:8;	signed:0;
+
+print fmt: "name: 0x%08lx, flags: 0x%08lx", ((unsigned long)(REC->name)), ((unsigned long)(REC->flags))
+
+>>> sys_exit_umount
+name: sys_exit_umount
+ID: 855
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:long ret;	offset:16;	size:8;	signed:1;
+
+print fmt: "0x%lx", REC->ret
+
+>>> sys_enter_pivot_root
+name: sys_enter_pivot_root
+ID: 846
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:const char * new_root;	offset:16;	size:8;	signed:0;
+	field:const char * put_old;	offset:24;	size:8;	signed:0;
+
+print fmt: "new_root: 0x%08lx, put_old: 0x%08lx", ((unsigned long)(REC->new_root)), ((unsigned long)(REC->put_old))
+
+>>> sys_exit_pivot_root
+name: sys_exit_pivot_root
+ID: 845
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:long ret;	offset:16;	size:8;	signed:1;
+
+print fmt: "0x%lx", REC->ret
+
+>>> sys_enter_fsopen
+name: sys_enter_fsopen
+ID: 950
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:const char * _fs_name;	offset:16;	size:8;	signed:0;
+	field:unsigned int flags;	offset:24;	size:8;	signed:0;
+
+print fmt: "_fs_name: 0x%08lx, flags: 0x%08lx", ((unsigned long)(REC->_fs_name)), ((unsigned long)(REC->flags))
+
+>>> sys_exit_fsopen
+name: sys_exit_fsopen
+ID: 949
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:long ret;	offset:16;	size:8;	signed:1;
+
+print fmt: "0x%lx", REC->ret
+
+>>> sys_enter_fspick
+name: sys_enter_fspick
+ID: 948
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:int dfd;	offset:16;	size:8;	signed:0;
+	field:const char * path;	offset:24;	size:8;	signed:0;
+	field:unsigned int flags;	offset:32;	size:8;	signed:0;
+
+print fmt: "dfd: 0x%08lx, path: 0x%08lx, flags: 0x%08lx", ((unsigned long)(REC->dfd)), ((unsigned long)(REC->path)), ((unsigned long)(REC->flags))
+
+>>> sys_exit_fspick
+name: sys_exit_fspick
+ID: 947
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:long ret;	offset:16;	size:8;	signed:1;
+
+print fmt: "0x%lx", REC->ret
+
+>>> sys_enter_fsconfig
+name: sys_enter_fsconfig
+ID: 946
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:int fd;	offset:16;	size:8;	signed:0;
+	field:unsigned int cmd;	offset:24;	size:8;	signed:0;
+	field:const char * _key;	offset:32;	size:8;	signed:0;
+	field:const void * _value;	offset:40;	size:8;	signed:0;
+	field:int aux;	offset:48;	size:8;	signed:0;
+
+print fmt: "fd: 0x%08lx, cmd: 0x%08lx, _key: 0x%08lx, _value: 0x%08lx, aux: 0x%08lx", ((unsigned long)(REC->fd)), ((unsigned long)(REC->cmd)), ((unsigned long)(REC->_key)), ((unsigned long)(REC->_value)), ((unsigned long)(REC->aux))
+
+>>> sys_exit_fsconfig
+name: sys_exit_fsconfig
+ID: 945
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:long ret;	offset:16;	size:8;	signed:1;
+
+print fmt: "0x%lx", REC->ret
+
+>>> sys_enter_fsmount
+name: sys_enter_fsmount
+ID: 850
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:int fs_fd;	offset:16;	size:8;	signed:0;
+	field:unsigned int flags;	offset:24;	size:8;	signed:0;
+	field:unsigned int attr_flags;	offset:32;	size:8;	signed:0;
+
+print fmt: "fs_fd: 0x%08lx, flags: 0x%08lx, attr_flags: 0x%08lx", ((unsigned long)(REC->fs_fd)), ((unsigned long)(REC->flags)), ((unsigned long)(REC->attr_flags))
+
+>>> sys_exit_fsmount
+name: sys_exit_fsmount
+ID: 849
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:long ret;	offset:16;	size:8;	signed:1;
+
+print fmt: "0x%lx", REC->ret
+
+>>> sys_enter_open_tree
+name: sys_enter_open_tree
+ID: 854
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:int dfd;	offset:16;	size:8;	signed:0;
+	field:const char * filename;	offset:24;	size:8;	signed:0;
+	field:unsigned flags;	offset:32;	size:8;	signed:0;
+
+print fmt: "dfd: 0x%08lx, filename: 0x%08lx, flags: 0x%08lx", ((unsigned long)(REC->dfd)), ((unsigned long)(REC->filename)), ((unsigned long)(REC->flags))
+
+>>> sys_exit_open_tree
+name: sys_exit_open_tree
+ID: 853
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:long ret;	offset:16;	size:8;	signed:1;
+
+print fmt: "0x%lx", REC->ret
+
+>>> sys_enter_statfs
+name: sys_enter_statfs
+ID: 944
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:const char * pathname;	offset:16;	size:8;	signed:0;
+	field:struct statfs * buf;	offset:24;	size:8;	signed:0;
+
+print fmt: "pathname: 0x%08lx, buf: 0x%08lx", ((unsigned long)(REC->pathname)), ((unsigned long)(REC->buf))
+
+>>> sys_exit_statfs
+name: sys_exit_statfs
+ID: 943
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:long ret;	offset:16;	size:8;	signed:1;
+
+print fmt: "0x%lx", REC->ret
+
+>>> sys_enter_fstatfs
+name: sys_enter_fstatfs
+ID: 942
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:unsigned int fd;	offset:16;	size:8;	signed:0;
+	field:struct statfs * buf;	offset:24;	size:8;	signed:0;
+
+print fmt: "fd: 0x%08lx, buf: 0x%08lx", ((unsigned long)(REC->fd)), ((unsigned long)(REC->buf))
+
+>>> sys_exit_fstatfs
+name: sys_exit_fstatfs
+ID: 941
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:long ret;	offset:16;	size:8;	signed:1;
+
+print fmt: "0x%lx", REC->ret
+
+>>> sys_enter_statmount
+name: sys_enter_statmount
+ID: 842
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:const struct mnt_id_req * req;	offset:16;	size:8;	signed:0;
+	field:struct statmount * buf;	offset:24;	size:8;	signed:0;
+	field:size_t bufsize;	offset:32;	size:8;	signed:0;
+	field:unsigned int flags;	offset:40;	size:8;	signed:0;
+
+print fmt: "req: 0x%08lx, buf: 0x%08lx, bufsize: 0x%08lx, flags: 0x%08lx", ((unsigned long)(REC->req)), ((unsigned long)(REC->buf)), ((unsigned long)(REC->bufsize)), ((unsigned long)(REC->flags))
+
+>>> sys_exit_statmount
+name: sys_exit_statmount
+ID: 841
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:long ret;	offset:16;	size:8;	signed:1;
+
+print fmt: "0x%lx", REC->ret
+
+>>> sys_enter_listmount
+name: sys_enter_listmount
+ID: 840
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:const struct mnt_id_req * req;	offset:16;	size:8;	signed:0;
+	field:u64 * mnt_ids;	offset:24;	size:8;	signed:0;
+	field:size_t nr_mnt_ids;	offset:32;	size:8;	signed:0;
+	field:unsigned int flags;	offset:40;	size:8;	signed:0;
+
+print fmt: "req: 0x%08lx, mnt_ids: 0x%08lx, nr_mnt_ids: 0x%08lx, flags: 0x%08lx", ((unsigned long)(REC->req)), ((unsigned long)(REC->mnt_ids)), ((unsigned long)(REC->nr_mnt_ids)), ((unsigned long)(REC->flags))
+
+>>> sys_exit_listmount
+name: sys_exit_listmount
+ID: 839
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:long ret;	offset:16;	size:8;	signed:1;
+
+print fmt: "0x%lx", REC->ret
+
+==========================================
+扩展属性
+==========================================
+>>> sys_enter_getxattr
+name: sys_enter_getxattr
+ID: 874
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:const char * pathname;	offset:16;	size:8;	signed:0;
+	field:const char * name;	offset:24;	size:8;	signed:0;
+	field:void * value;	offset:32;	size:8;	signed:0;
+	field:size_t size;	offset:40;	size:8;	signed:0;
+
+print fmt: "pathname: 0x%08lx, name: 0x%08lx, value: 0x%08lx, size: 0x%08lx", ((unsigned long)(REC->pathname)), ((unsigned long)(REC->name)), ((unsigned long)(REC->value)), ((unsigned long)(REC->size))
+
+>>> sys_exit_getxattr
+name: sys_exit_getxattr
+ID: 873
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:long ret;	offset:16;	size:8;	signed:1;
+
+print fmt: "0x%lx", REC->ret
+
+>>> sys_enter_lgetxattr
+name: sys_enter_lgetxattr
+ID: 872
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:const char * pathname;	offset:16;	size:8;	signed:0;
+	field:const char * name;	offset:24;	size:8;	signed:0;
+	field:void * value;	offset:32;	size:8;	signed:0;
+	field:size_t size;	offset:40;	size:8;	signed:0;
+
+print fmt: "pathname: 0x%08lx, name: 0x%08lx, value: 0x%08lx, size: 0x%08lx", ((unsigned long)(REC->pathname)), ((unsigned long)(REC->name)), ((unsigned long)(REC->value)), ((unsigned long)(REC->size))
+
+>>> sys_exit_lgetxattr
+name: sys_exit_lgetxattr
+ID: 871
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:long ret;	offset:16;	size:8;	signed:1;
+
+print fmt: "0x%lx", REC->ret
+
+>>> sys_enter_fgetxattr
+name: sys_enter_fgetxattr
+ID: 870
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:int fd;	offset:16;	size:8;	signed:0;
+	field:const char * name;	offset:24;	size:8;	signed:0;
+	field:void * value;	offset:32;	size:8;	signed:0;
+	field:size_t size;	offset:40;	size:8;	signed:0;
+
+print fmt: "fd: 0x%08lx, name: 0x%08lx, value: 0x%08lx, size: 0x%08lx", ((unsigned long)(REC->fd)), ((unsigned long)(REC->name)), ((unsigned long)(REC->value)), ((unsigned long)(REC->size))
+
+>>> sys_exit_fgetxattr
+name: sys_exit_fgetxattr
+ID: 869
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:long ret;	offset:16;	size:8;	signed:1;
+
+print fmt: "0x%lx", REC->ret
+
+>>> sys_enter_setxattr
+name: sys_enter_setxattr
+ID: 880
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:const char * pathname;	offset:16;	size:8;	signed:0;
+	field:const char * name;	offset:24;	size:8;	signed:0;
+	field:const void * value;	offset:32;	size:8;	signed:0;
+	field:size_t size;	offset:40;	size:8;	signed:0;
+	field:int flags;	offset:48;	size:8;	signed:0;
+
+print fmt: "pathname: 0x%08lx, name: 0x%08lx, value: 0x%08lx, size: 0x%08lx, flags: 0x%08lx", ((unsigned long)(REC->pathname)), ((unsigned long)(REC->name)), ((unsigned long)(REC->value)), ((unsigned long)(REC->size)), ((unsigned long)(REC->flags))
+
+>>> sys_exit_setxattr
+name: sys_exit_setxattr
+ID: 879
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:long ret;	offset:16;	size:8;	signed:1;
+
+print fmt: "0x%lx", REC->ret
+
+>>> sys_enter_lsetxattr
+name: sys_enter_lsetxattr
+ID: 878
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:const char * pathname;	offset:16;	size:8;	signed:0;
+	field:const char * name;	offset:24;	size:8;	signed:0;
+	field:const void * value;	offset:32;	size:8;	signed:0;
+	field:size_t size;	offset:40;	size:8;	signed:0;
+	field:int flags;	offset:48;	size:8;	signed:0;
+
+print fmt: "pathname: 0x%08lx, name: 0x%08lx, value: 0x%08lx, size: 0x%08lx, flags: 0x%08lx", ((unsigned long)(REC->pathname)), ((unsigned long)(REC->name)), ((unsigned long)(REC->value)), ((unsigned long)(REC->size)), ((unsigned long)(REC->flags))
+
+>>> sys_exit_lsetxattr
+name: sys_exit_lsetxattr
+ID: 877
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:long ret;	offset:16;	size:8;	signed:1;
+
+print fmt: "0x%lx", REC->ret
+
+>>> sys_enter_fsetxattr
+name: sys_enter_fsetxattr
+ID: 876
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:int fd;	offset:16;	size:8;	signed:0;
+	field:const char * name;	offset:24;	size:8;	signed:0;
+	field:const void * value;	offset:32;	size:8;	signed:0;
+	field:size_t size;	offset:40;	size:8;	signed:0;
+	field:int flags;	offset:48;	size:8;	signed:0;
+
+print fmt: "fd: 0x%08lx, name: 0x%08lx, value: 0x%08lx, size: 0x%08lx, flags: 0x%08lx", ((unsigned long)(REC->fd)), ((unsigned long)(REC->name)), ((unsigned long)(REC->value)), ((unsigned long)(REC->size)), ((unsigned long)(REC->flags))
+
+>>> sys_exit_fsetxattr
+name: sys_exit_fsetxattr
+ID: 875
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:long ret;	offset:16;	size:8;	signed:1;
+
+print fmt: "0x%lx", REC->ret
+
+>>> sys_enter_listxattr
+name: sys_enter_listxattr
+ID: 868
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:const char * pathname;	offset:16;	size:8;	signed:0;
+	field:char * list;	offset:24;	size:8;	signed:0;
+	field:size_t size;	offset:32;	size:8;	signed:0;
+
+print fmt: "pathname: 0x%08lx, list: 0x%08lx, size: 0x%08lx", ((unsigned long)(REC->pathname)), ((unsigned long)(REC->list)), ((unsigned long)(REC->size))
+
+>>> sys_exit_listxattr
+name: sys_exit_listxattr
+ID: 867
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:long ret;	offset:16;	size:8;	signed:1;
+
+print fmt: "0x%lx", REC->ret
+
+>>> sys_enter_llistxattr
+name: sys_enter_llistxattr
+ID: 866
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:const char * pathname;	offset:16;	size:8;	signed:0;
+	field:char * list;	offset:24;	size:8;	signed:0;
+	field:size_t size;	offset:32;	size:8;	signed:0;
+
+print fmt: "pathname: 0x%08lx, list: 0x%08lx, size: 0x%08lx", ((unsigned long)(REC->pathname)), ((unsigned long)(REC->list)), ((unsigned long)(REC->size))
+
+>>> sys_exit_llistxattr
+name: sys_exit_llistxattr
+ID: 865
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:long ret;	offset:16;	size:8;	signed:1;
+
+print fmt: "0x%lx", REC->ret
+
+>>> sys_enter_flistxattr
+name: sys_enter_flistxattr
+ID: 864
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:int fd;	offset:16;	size:8;	signed:0;
+	field:char * list;	offset:24;	size:8;	signed:0;
+	field:size_t size;	offset:32;	size:8;	signed:0;
+
+print fmt: "fd: 0x%08lx, list: 0x%08lx, size: 0x%08lx", ((unsigned long)(REC->fd)), ((unsigned long)(REC->list)), ((unsigned long)(REC->size))
+
+>>> sys_exit_flistxattr
+name: sys_exit_flistxattr
+ID: 863
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:long ret;	offset:16;	size:8;	signed:1;
+
+print fmt: "0x%lx", REC->ret
+
+>>> sys_enter_removexattr
+name: sys_enter_removexattr
+ID: 862
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:const char * pathname;	offset:16;	size:8;	signed:0;
+	field:const char * name;	offset:24;	size:8;	signed:0;
+
+print fmt: "pathname: 0x%08lx, name: 0x%08lx", ((unsigned long)(REC->pathname)), ((unsigned long)(REC->name))
+
+>>> sys_exit_removexattr
+name: sys_exit_removexattr
+ID: 861
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:long ret;	offset:16;	size:8;	signed:1;
+
+print fmt: "0x%lx", REC->ret
+
+>>> sys_enter_lremovexattr
+name: sys_enter_lremovexattr
+ID: 860
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:const char * pathname;	offset:16;	size:8;	signed:0;
+	field:const char * name;	offset:24;	size:8;	signed:0;
+
+print fmt: "pathname: 0x%08lx, name: 0x%08lx", ((unsigned long)(REC->pathname)), ((unsigned long)(REC->name))
+
+>>> sys_exit_lremovexattr
+name: sys_exit_lremovexattr
+ID: 859
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:long ret;	offset:16;	size:8;	signed:1;
+
+print fmt: "0x%lx", REC->ret
+
+>>> sys_enter_fremovexattr
+name: sys_enter_fremovexattr
+ID: 858
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:int fd;	offset:16;	size:8;	signed:0;
+	field:const char * name;	offset:24;	size:8;	signed:0;
+
+print fmt: "fd: 0x%08lx, name: 0x%08lx", ((unsigned long)(REC->fd)), ((unsigned long)(REC->name))
+
+>>> sys_exit_fremovexattr
+name: sys_exit_fremovexattr
+ID: 857
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:long ret;	offset:16;	size:8;	signed:1;
+
+print fmt: "0x%lx", REC->ret
+
+==========================================
+文件描述符操作
+==========================================
+>>> sys_enter_pipe
+name: sys_enter_pipe
+ID: 784
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:int * fildes;	offset:16;	size:8;	signed:0;
+
+print fmt: "fildes: 0x%08lx", ((unsigned long)(REC->fildes))
+
+>>> sys_exit_pipe
+name: sys_exit_pipe
+ID: 783
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:long ret;	offset:16;	size:8;	signed:1;
+
+print fmt: "0x%lx", REC->ret
+
+>>> sys_enter_pipe2
+name: sys_enter_pipe2
+ID: 786
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:int * fildes;	offset:16;	size:8;	signed:0;
+	field:int flags;	offset:24;	size:8;	signed:0;
+
+print fmt: "fildes: 0x%08lx, flags: 0x%08lx", ((unsigned long)(REC->fildes)), ((unsigned long)(REC->flags))
+
+>>> sys_exit_pipe2
+name: sys_exit_pipe2
+ID: 785
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:long ret;	offset:16;	size:8;	signed:1;
+
+print fmt: "0x%lx", REC->ret
+
+>>> sys_enter_select
+name: sys_enter_select
+ID: 830
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:int n;	offset:16;	size:8;	signed:0;
+	field:fd_set * inp;	offset:24;	size:8;	signed:0;
+	field:fd_set * outp;	offset:32;	size:8;	signed:0;
+	field:fd_set * exp;	offset:40;	size:8;	signed:0;
+	field:struct __kernel_old_timeval * tvp;	offset:48;	size:8;	signed:0;
+
+print fmt: "n: 0x%08lx, inp: 0x%08lx, outp: 0x%08lx, exp: 0x%08lx, tvp: 0x%08lx", ((unsigned long)(REC->n)), ((unsigned long)(REC->inp)), ((unsigned long)(REC->outp)), ((unsigned long)(REC->exp)), ((unsigned long)(REC->tvp))
+
+>>> sys_exit_select
+name: sys_exit_select
+ID: 829
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:long ret;	offset:16;	size:8;	signed:1;
+
+print fmt: "0x%lx", REC->ret
+
+>>> sys_enter_pselect6
+name: sys_enter_pselect6
+ID: 828
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:int n;	offset:16;	size:8;	signed:0;
+	field:fd_set * inp;	offset:24;	size:8;	signed:0;
+	field:fd_set * outp;	offset:32;	size:8;	signed:0;
+	field:fd_set * exp;	offset:40;	size:8;	signed:0;
+	field:struct __kernel_timespec * tsp;	offset:48;	size:8;	signed:0;
+	field:void * sig;	offset:56;	size:8;	signed:0;
+
+print fmt: "n: 0x%08lx, inp: 0x%08lx, outp: 0x%08lx, exp: 0x%08lx, tsp: 0x%08lx, sig: 0x%08lx", ((unsigned long)(REC->n)), ((unsigned long)(REC->inp)), ((unsigned long)(REC->outp)), ((unsigned long)(REC->exp)), ((unsigned long)(REC->tsp)), ((unsigned long)(REC->sig))
+
+>>> sys_exit_pselect6
+name: sys_exit_pselect6
+ID: 827
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:long ret;	offset:16;	size:8;	signed:1;
+
+print fmt: "0x%lx", REC->ret
+
+>>> sys_enter_poll
+name: sys_enter_poll
+ID: 826
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:struct pollfd * ufds;	offset:16;	size:8;	signed:0;
+	field:unsigned int nfds;	offset:24;	size:8;	signed:0;
+	field:int timeout_msecs;	offset:32;	size:8;	signed:0;
+
+print fmt: "ufds: 0x%08lx, nfds: 0x%08lx, timeout_msecs: 0x%08lx", ((unsigned long)(REC->ufds)), ((unsigned long)(REC->nfds)), ((unsigned long)(REC->timeout_msecs))
+
+>>> sys_exit_poll
+name: sys_exit_poll
+ID: 825
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:long ret;	offset:16;	size:8;	signed:1;
+
+print fmt: "0x%lx", REC->ret
+
+>>> sys_enter_ppoll
+name: sys_enter_ppoll
+ID: 824
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:struct pollfd * ufds;	offset:16;	size:8;	signed:0;
+	field:unsigned int nfds;	offset:24;	size:8;	signed:0;
+	field:struct __kernel_timespec * tsp;	offset:32;	size:8;	signed:0;
+	field:const sigset_t * sigmask;	offset:40;	size:8;	signed:0;
+	field:size_t sigsetsize;	offset:48;	size:8;	signed:0;
+
+print fmt: "ufds: 0x%08lx, nfds: 0x%08lx, tsp: 0x%08lx, sigmask: 0x%08lx, sigsetsize: 0x%08lx", ((unsigned long)(REC->ufds)), ((unsigned long)(REC->nfds)), ((unsigned long)(REC->tsp)), ((unsigned long)(REC->sigmask)), ((unsigned long)(REC->sigsetsize))
+
+>>> sys_exit_ppoll
+name: sys_exit_ppoll
+ID: 823
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:long ret;	offset:16;	size:8;	signed:1;
+
+print fmt: "0x%lx", REC->ret
+
+>>> sys_enter_epoll_create
+name: sys_enter_epoll_create
+ID: 972
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:int size;	offset:16;	size:8;	signed:0;
+
+print fmt: "size: 0x%08lx", ((unsigned long)(REC->size))
+
+>>> sys_exit_epoll_create
+name: sys_exit_epoll_create
+ID: 971
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:long ret;	offset:16;	size:8;	signed:1;
+
+print fmt: "0x%lx", REC->ret
+
+>>> sys_enter_epoll_create1
+name: sys_enter_epoll_create1
+ID: 974
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:int flags;	offset:16;	size:8;	signed:0;
+
+print fmt: "flags: 0x%08lx", ((unsigned long)(REC->flags))
+
+>>> sys_exit_epoll_create1
+name: sys_exit_epoll_create1
+ID: 973
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:long ret;	offset:16;	size:8;	signed:1;
+
+print fmt: "0x%lx", REC->ret
+
+>>> sys_enter_epoll_ctl
+name: sys_enter_epoll_ctl
+ID: 970
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:int epfd;	offset:16;	size:8;	signed:0;
+	field:int op;	offset:24;	size:8;	signed:0;
+	field:int fd;	offset:32;	size:8;	signed:0;
+	field:struct epoll_event * event;	offset:40;	size:8;	signed:0;
+
+print fmt: "epfd: 0x%08lx, op: 0x%08lx, fd: 0x%08lx, event: 0x%08lx", ((unsigned long)(REC->epfd)), ((unsigned long)(REC->op)), ((unsigned long)(REC->fd)), ((unsigned long)(REC->event))
+
+>>> sys_exit_epoll_ctl
+name: sys_exit_epoll_ctl
+ID: 969
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:long ret;	offset:16;	size:8;	signed:1;
+
+print fmt: "0x%lx", REC->ret
+
+>>> sys_enter_epoll_wait
+name: sys_enter_epoll_wait
+ID: 968
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:int epfd;	offset:16;	size:8;	signed:0;
+	field:struct epoll_event * events;	offset:24;	size:8;	signed:0;
+	field:int maxevents;	offset:32;	size:8;	signed:0;
+	field:int timeout;	offset:40;	size:8;	signed:0;
+
+print fmt: "epfd: 0x%08lx, events: 0x%08lx, maxevents: 0x%08lx, timeout: 0x%08lx", ((unsigned long)(REC->epfd)), ((unsigned long)(REC->events)), ((unsigned long)(REC->maxevents)), ((unsigned long)(REC->timeout))
+
+>>> sys_exit_epoll_wait
+name: sys_exit_epoll_wait
+ID: 967
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:long ret;	offset:16;	size:8;	signed:1;
+
+print fmt: "0x%lx", REC->ret
+
+>>> sys_enter_epoll_pwait
+name: sys_enter_epoll_pwait
+ID: 966
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:int epfd;	offset:16;	size:8;	signed:0;
+	field:struct epoll_event * events;	offset:24;	size:8;	signed:0;
+	field:int maxevents;	offset:32;	size:8;	signed:0;
+	field:int timeout;	offset:40;	size:8;	signed:0;
+	field:const sigset_t * sigmask;	offset:48;	size:8;	signed:0;
+	field:size_t sigsetsize;	offset:56;	size:8;	signed:0;
+
+print fmt: "epfd: 0x%08lx, events: 0x%08lx, maxevents: 0x%08lx, timeout: 0x%08lx, sigmask: 0x%08lx, sigsetsize: 0x%08lx", ((unsigned long)(REC->epfd)), ((unsigned long)(REC->events)), ((unsigned long)(REC->maxevents)), ((unsigned long)(REC->timeout)), ((unsigned long)(REC->sigmask)), ((unsigned long)(REC->sigsetsize))
+
+>>> sys_exit_epoll_pwait
+name: sys_exit_epoll_pwait
+ID: 965
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:long ret;	offset:16;	size:8;	signed:1;
+
+print fmt: "0x%lx", REC->ret
+
+>>> sys_enter_epoll_pwait2
+name: sys_enter_epoll_pwait2
+ID: 964
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:int epfd;	offset:16;	size:8;	signed:0;
+	field:struct epoll_event * events;	offset:24;	size:8;	signed:0;
+	field:int maxevents;	offset:32;	size:8;	signed:0;
+	field:const struct __kernel_timespec * timeout;	offset:40;	size:8;	signed:0;
+	field:const sigset_t * sigmask;	offset:48;	size:8;	signed:0;
+	field:size_t sigsetsize;	offset:56;	size:8;	signed:0;
+
+print fmt: "epfd: 0x%08lx, events: 0x%08lx, maxevents: 0x%08lx, timeout: 0x%08lx, sigmask: 0x%08lx, sigsetsize: 0x%08lx", ((unsigned long)(REC->epfd)), ((unsigned long)(REC->events)), ((unsigned long)(REC->maxevents)), ((unsigned long)(REC->timeout)), ((unsigned long)(REC->sigmask)), ((unsigned long)(REC->sigsetsize))
+
+>>> sys_exit_epoll_pwait2
+name: sys_exit_epoll_pwait2
+ID: 963
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+	field:long ret;	offset:16;	size:8;	signed:1;
+
+print fmt: "0x%lx", REC->ret
+
+==========================================
+完成！
+==========================================

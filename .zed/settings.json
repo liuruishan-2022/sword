@@ -1,0 +1,11 @@
+{
+  "lsp": {
+    "rust-analyzer": {
+      "binary": {
+        "env": {
+          "PATH": "/home/liuxu/.cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/local/go/bin:/media/data/store/go/bin:/opt/maven/bin:/opt/flutter/bin:/opt/wasmer/bin"
+        }
+      }
+    }
+  }
+}

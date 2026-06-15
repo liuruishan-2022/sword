@@ -1,12 +1,16 @@
-use crate::network::bindings::{sock, sock_common};
+use crate::{
+    common,
+    network::bindings::{sock, sock_common},
+};
 ///
 /// 对tcp的整个生命周期进行操作
 ///
 use aya_ebpf::{
-    helpers::{bpf_get_current_pid_tgid, bpf_probe_read_kernel},
-    macros::{kprobe, map},
-    maps::Array,
-    programs::ProbeContext,
+    bindings::sockaddr,
+    helpers::{bpf_get_current_pid_tgid, bpf_probe_read_kernel, bpf_probe_read_user},
+    macros::{kprobe, map, tracepoint},
+    maps::{Array, PerCpuHashMap},
+    programs::{ProbeContext, TracePointContext},
 };
 use aya_log_ebpf::info;
 use sword_common::TcpSendmsgTarget;
@@ -16,6 +20,9 @@ const AF_INET6: u16 = 10;
 
 #[map]
 pub static TCP_SENDMSG_TARGET: Array<TcpSendmsgTarget> = Array::with_max_entries(1, 0);
+
+#[map]
+pub static SYS_ENTER_CONNECT: PerCpuHashMap<u32, u64> = PerCpuHashMap::with_max_entries(4096, 0);
 
 ///
 /// kfunc:vmlinux:tcp_sendmsg
@@ -143,4 +150,56 @@ fn matches_tcp_sendmsg_target() -> Result<bool, u32> {
     let current_pid = (bpf_get_current_pid_tgid() >> 32) as u32;
 
     Ok(current_pid == target.pid)
+}
+
+///
+/// 跟蹤一些tracepoint來做一些鏈接信息的統計
+///
+
+///
+/// /sys/kernel/debug/tracing/events/syscalls/sys_enter_connect/format
+/// name: sys_enter_connect
+/// ID: 1674
+/// format:
+/// 	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+/// 	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+/// 	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+/// 	field:int common_pid;	offset:4;	size:4;	signed:1;
+///
+/// 	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+/// 	field:int fd;	offset:16;	size:8;	signed:0;
+/// 	field:struct sockaddr * uservaddr;	offset:24;	size:8;	signed:0;
+/// 	field:int addrlen;	offset:32;	size:8;	signed:0;
+///
+/// print fmt: "fd: 0x%08lx, uservaddr: 0x%08lx, addrlen: 0x%08lx", ((unsigned long)(REC->fd)), ((unsigned long)(REC->uservaddr)), ((unsigned long)(REC->addrlen))
+///
+#[tracepoint]
+pub fn sys_enter_connect(ctx: TracePointContext) -> u32 {
+    match try_sys_enter_connect(ctx) {
+        Ok(ret) => ret,
+        Err(err) => err as u32,
+    }
+}
+
+fn try_sys_enter_connect(ctx: TracePointContext) -> Result<u32, i64> {
+    let (pid, _tid) = common::thread_id();
+
+    unsafe {
+        match SYS_ENTER_CONNECT.get_ptr_mut(&pid) {
+            Some(count) => {
+                *count = *count + 1;
+            }
+            None => {
+                SYS_ENTER_CONNECT.insert(pid, 1, 0)?;
+            }
+        }
+        let fd = ctx.read_at::<u64>(16)?;
+        info!(&ctx, "掉用connect函數的鏈接:{}!", fd);
+
+        let useraddr = ctx.read_at::<u64>(24)? as *const sockaddr;
+        let sa = { bpf_probe_read_user(useraddr).map_err(|_| 1i64)? };
+        info!(&ctx, "查看具體的sa_family:{}!", sa.sa_family);
+    }
+
+    Ok(0)
 }

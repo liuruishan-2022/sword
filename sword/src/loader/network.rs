@@ -3,6 +3,7 @@
 ///
 use aya::maps::{Array, MapData};
 use aya::programs::KProbe;
+use aya::programs::TracePoint;
 use log::info;
 use sword_common::TcpSendmsgTarget;
 
@@ -46,4 +47,19 @@ fn configure_tcp_sendmsg_target(ebpf: &mut aya::Ebpf, pid: u32) -> anyhow::Resul
 
 fn tcp_sendmsg_target(pid: u32) -> TcpSendmsgTarget {
     TcpSendmsgTarget { pid, _pad: 0 }
+}
+
+///
+/// 加載tracepoint
+///
+pub fn load_tracepoint(ebpf: &mut aya::Ebpf) -> anyhow::Result<()> {
+    load_sys_enter_connect(ebpf)?;
+    Ok(())
+}
+
+fn load_sys_enter_connect(ebpf: &mut aya::Ebpf) -> anyhow::Result<()> {
+    let program: &mut TracePoint = ebpf.program_mut("sys_enter_connect").unwrap().try_into()?;
+    program.load()?;
+    program.attach("syscalls", "sys_enter_connect")?;
+    Ok(())
 }

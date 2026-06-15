@@ -8,21 +8,24 @@ use axum::{
     response::IntoResponse,
     routing::get,
 };
-use aya::maps::{HashMap, MapData, PerCpuArray};
+use aya::maps::{HashMap, MapData, PerCpuArray, PerCpuHashMap};
 use log::{error, info};
 use sword_common::{SchedSwitchStateKey, ThreadComm};
 use tokio::net::TcpListener;
 use tokio::sync::Mutex;
 
 use crate::metrics::cpu::CpuCollector;
+use crate::metrics::network::NetworkCollector;
 
 pub mod cpu;
+pub mod network;
 
 const SCHED_SWITCH_TOTAL_MAP: &str = "SCHED_SWITCH_TOTAL";
 const THREAD_SWITCH_OUT_TOTAL_MAP: &str = "THREAD_SWITCH_OUT_TOTAL";
 const THREAD_OFFCPU_TOTAL_NS_MAP: &str = "THREAD_OFFCPU_TOTAL_NS";
 const THREAD_COMM_MAP: &str = "THREAD_COMM";
 const SYS_ENTER_OPEN_COUNTER_MAP: &str = "SYS_ENTER_OPEN_COUNTER";
+const SYS_ENTER_CONNECT: &str = "SYS_ENTER_CONNECT";
 
 pub async fn spawn_prometheus_exporter(ebpf: &mut aya::Ebpf) -> anyhow::Result<()> {
     let map = ebpf
@@ -52,6 +55,11 @@ pub async fn spawn_prometheus_exporter(ebpf: &mut aya::Ebpf) -> anyhow::Result<(
         .ok_or_else(|| anyhow::anyhow!("map {THREAD_COMM_MAP} not found"))?;
     let thread_comm_map: HashMap<MapData, u32, ThreadComm> = HashMap::try_from(map)?;
 
+    let map = ebpf
+        .take_map(SYS_ENTER_CONNECT)
+        .ok_or_else(|| anyhow::anyhow!("map {SYS_ENTER_CONNECT} not found"))?;
+    let sys_enter_connect_map: PerCpuHashMap<MapData, u32, u64> = PerCpuHashMap::try_from(map)?;
+
     let cpu_state = CpuCollector::new(
         sched_switch_total_map,
         sys_enter_open_counter_map,
@@ -59,12 +67,16 @@ pub async fn spawn_prometheus_exporter(ebpf: &mut aya::Ebpf) -> anyhow::Result<(
         thread_offcpu_total_ns_map,
         thread_comm_map,
     );
-    let cpu_state = Arc::new(Mutex::new(cpu_state));
+    let network_state = NetworkCollector::new(sys_enter_connect_map);
+    let exporter_state = Arc::new(Mutex::new(MetricsState {
+        cpu: cpu_state,
+        network: network_state,
+    }));
 
     let app = Router::new()
         .route("/metrics", get(metrics_handler))
         .route("/health", get(health_handler))
-        .with_state(cpu_state);
+        .with_state(exporter_state);
     let listener = TcpListener::bind("0.0.0.0:9898").await?;
 
     tokio::spawn(async move {
@@ -85,9 +97,9 @@ async fn health_handler() -> impl IntoResponse {
 }
 
 async fn metrics_handler(
-    State(cpu_collector): State<Arc<Mutex<CpuCollector>>>,
+    State(metrics_state): State<Arc<Mutex<MetricsState>>>,
 ) -> impl IntoResponse {
-    match cpu_collector.lock().await.metrics().await {
+    match metrics_state.lock().await.metrics().await {
         Ok(metrics) => Response::builder()
             .header(
                 CONTENT_TYPE,
@@ -103,4 +115,26 @@ async fn metrics_handler(
                 .unwrap()
         }
     }
+}
+
+struct MetricsState {
+    cpu: CpuCollector,
+    network: NetworkCollector,
+}
+
+impl MetricsState {
+    async fn metrics(&self) -> anyhow::Result<String> {
+        let mut metrics = trim_openmetrics_eof(self.cpu.metrics().await?);
+        metrics.push_str(&trim_openmetrics_eof(self.network.metrics().await?));
+        metrics.push_str("# EOF\n");
+        Ok(metrics)
+    }
+}
+
+fn trim_openmetrics_eof(mut metrics: String) -> String {
+    const EOF_MARKER: &str = "# EOF\n";
+    if metrics.ends_with(EOF_MARKER) {
+        metrics.truncate(metrics.len() - EOF_MARKER.len());
+    }
+    metrics
 }
