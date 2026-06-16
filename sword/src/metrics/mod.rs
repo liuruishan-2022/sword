@@ -103,7 +103,7 @@ async fn metrics_handler(
         Ok(metrics) => Response::builder()
             .header(
                 CONTENT_TYPE,
-                "application/openmetrics-text; version=1.0.0; charset=utf-8",
+                "application/openmetrics-text;version=1.0.0; charset=utf-8",
             )
             .body(Body::from(metrics))
             .unwrap(),
@@ -123,7 +123,7 @@ struct MetricsState {
 }
 
 impl MetricsState {
-    async fn metrics(&self) -> anyhow::Result<String> {
+    async fn metrics(&mut self) -> anyhow::Result<String> {
         let mut metrics = trim_openmetrics_eof(self.cpu.metrics().await?);
         metrics.push_str(&trim_openmetrics_eof(self.network.metrics().await?));
         metrics.push_str("# EOF\n");

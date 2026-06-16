@@ -36,6 +36,10 @@ impl NetworkMetrics {
             .get_or_create(&TcpLabels { pid })
             .set(count);
     }
+
+    pub fn remove_pid_tcp_total(&self, pid: u32) {
+        self.pid_tcp_total.remove(&TcpLabels { pid });
+    }
 }
 
 pub struct NetworkCollector {
@@ -55,19 +59,36 @@ impl NetworkCollector {
         }
     }
 
-    pub async fn collect(&self) -> Result<(), MapError> {
+    pub async fn collect(&mut self) -> Result<(), MapError> {
+        let mut stale_pids = Vec::new();
+
         for item in self.sys_enter_connect.iter() {
             let (pid, counts) = item?;
+            if !pid_exists(pid) {
+                stale_pids.push(pid);
+                continue;
+            }
+
             let total = counts.iter().copied().sum();
             self.network.pid_tcp_total(pid, total);
         }
+
+        for pid in stale_pids {
+            self.sys_enter_connect.remove(&pid)?;
+            self.network.remove_pid_tcp_total(pid);
+        }
+
         Ok(())
     }
 
-    pub async fn metrics(&self) -> anyhow::Result<String> {
+    pub async fn metrics(&mut self) -> anyhow::Result<String> {
         self.collect().await?;
         let mut buffer = String::new();
         encode(&mut buffer, &self.registry)?;
         Ok(buffer)
     }
+}
+
+fn pid_exists(pid: u32) -> bool {
+    std::path::Path::new("/proc").join(pid.to_string()).exists()
 }
