@@ -203,3 +203,80 @@ fn try_sys_enter_connect(ctx: TracePointContext) -> Result<u32, i64> {
 
     Ok(0)
 }
+
+///
+/// 继续挂载sys_enter_socket
+///
+/// 执行的顺序是 sys_enter_socket--->sys_enter_connect
+///
+/// name: sys_enter_socket
+/// ID: 1566
+/// format:
+/// 	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+/// 	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+/// 	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+/// 	field:int common_pid;	offset:4;	size:4;	signed:1;
+///
+/// 	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+/// 	field:int family;	offset:16;	size:8;	signed:0;
+/// 	field:int type;	offset:24;	size:8;	signed:0;
+/// 	field:int protocol;	offset:32;	size:8;	signed:0;
+///
+/// print fmt: "family: 0x%08lx, type: 0x%08lx, protocol: 0x%08lx", ((unsigned long)(REC->family)), ((unsigned long)(REC->type)), ((unsigned long)(REC->protocol))
+///
+#[tracepoint]
+pub fn sys_enter_socket(ctx: TracePointContext) -> u32 {
+    match try_sys_enter_socket(ctx) {
+        Ok(ret) => ret,
+        Err(err) => err as u32,
+    }
+}
+
+fn try_sys_enter_socket(ctx: TracePointContext) -> Result<u32, i64> {
+    unsafe {
+        let family = ctx.read_at::<u64>(16)?;
+        let sock_type = ctx.read_at::<u64>(24)?;
+        let protocol = ctx.read_at::<u64>(32)?;
+
+        info!(
+            &ctx,
+            "执行获取到的信息: family:{} sock_type:{} protocol:{}!", family, sock_type, protocol
+        );
+    }
+    Ok(0)
+}
+
+///
+/// 进入sys_exit_socket的追踪
+///
+/// name: sys_exit_socket
+/// ID: 1565
+/// format:
+/// 	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+/// 	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+/// 	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+/// 	field:int common_pid;	offset:4;	size:4;	signed:1;
+///
+/// 	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+/// 	field:long ret;	offset:16;	size:8;	signed:1;
+///
+/// print fmt: "0x%lx", REC->ret
+///
+
+#[tracepoint]
+pub fn sys_exit_socket(ctx: TracePointContext) -> u32 {
+    match try_sys_exit_socket(ctx) {
+        Ok(ret) => ret,
+        Err(err) => err as u32,
+    }
+}
+
+fn try_sys_exit_socket(ctx: TracePointContext) -> Result<u32, i64> {
+    let (pid, tid) = common::thread_id();
+
+    unsafe {
+        let ret = ctx.read_at::<u64>(16)?;
+        info!(&ctx, "对应的进程:{}-{} socket函数返回值:{}!", pid, tid, ret);
+    }
+    Ok(0)
+}

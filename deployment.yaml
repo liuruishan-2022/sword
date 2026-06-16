@@ -42,7 +42,7 @@ spec:
       serviceAccountName: sword-ebpf
       containers:
       - name: sword
-        image: xwharbor.wxchina.com/cpaas/component/sword:v0.1.0-964a84e45b
+        image: xwharbor.wxchina.com/cpaas/component/sword:v0.1.0-58ced27265
         imagePullPolicy: IfNotPresent
         securityContext:
           privileged: true
@@ -125,7 +125,7 @@ spec:
         - net-request
         - https://www.baidu.com/
         - "1"
-        - "0"
+        - "1000"
         - "5000"
         resources:
           limits:
