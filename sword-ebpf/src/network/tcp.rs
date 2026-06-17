@@ -280,3 +280,26 @@ fn try_sys_exit_socket(ctx: TracePointContext) -> Result<u32, i64> {
     }
     Ok(0)
 }
+
+///
+/// 抓取tcp_recvmsg这个krprobe
+/// kfunc:vmlinux:tcp_recvmsg
+///     struct sock * sk TCP的sock对象
+///     struct msghdr * msg 本次recv的消息描述结构
+///     size_t len 应用这次想要读取的最大字节数
+///     int flags MSG_DONTWAIT 非阻塞 MSG_PEEK 窥探 MSG_WAITALL 尽量读 MSG_TRUNC 截断语义相关
+///     int * addr_len 用于返回对端的地址长度
+///     int retval 返回值
+///
+
+#[kprobe]
+pub fn tcp_recvmsg(ctx: ProbeContext) -> u32 {
+    match try_tcp_recvmsg(ctx) {
+        Ok(ret) => ret,
+        Err(err) => err as u32,
+    }
+}
+
+fn try_tcp_recvmsg(ctx: ProbeContext) -> Result<u32, i64> {
+    Ok(0)
+}
