@@ -2,7 +2,7 @@
 #![allow(non_snake_case)]
 #![allow(non_upper_case_globals)]
 
-use aya_ebpf::cty::{c_int, c_uchar, c_uint, c_ulonglong, c_ushort, c_void};
+use aya_ebpf::cty::{c_int, c_uchar, c_uint, c_ulong, c_ulonglong, c_ushort, c_void};
 
 pub type __u8 = c_uchar;
 pub type __u16 = c_ushort;
@@ -70,6 +70,36 @@ pub struct possible_net_t {
 
 #[repr(C)]
 #[derive(Copy, Clone)]
+pub struct atomic_t {
+    pub counter: c_int,
+}
+
+#[repr(C)]
+#[derive(Copy, Clone)]
+pub struct refcount_t {
+    pub refs: atomic_t,
+}
+
+#[repr(C)]
+#[derive(Copy, Clone)]
+pub struct sk_buff_head {
+    pub next: *mut c_void,
+    pub prev: *mut c_void,
+    pub qlen: __u32,
+    pub lock: [u8; 4usize],
+}
+
+#[repr(C)]
+#[derive(Copy, Clone)]
+pub struct sock_backlog {
+    pub rmem_alloc: atomic_t,
+    pub len: c_int,
+    pub head: *mut c_void,
+    pub tail: *mut c_void,
+}
+
+#[repr(C)]
+#[derive(Copy, Clone)]
 pub struct sock_common {
     pub __bindgen_anon_1: sock_common__bindgen_ty_1,
     pub __bindgen_anon_2: sock_common__bindgen_ty_2,
@@ -83,10 +113,37 @@ pub struct sock_common {
     pub skc_net: possible_net_t,
     pub skc_v6_daddr: in6_addr,
     pub skc_v6_rcv_saddr: in6_addr,
+    pub __bindgen_padding_0: [u8; 48usize],
 }
 
 #[repr(C)]
 #[derive(Copy, Clone)]
 pub struct sock {
     pub __sk_common: sock_common,
+    pub sk_rx_dst: *mut c_void,
+    pub sk_rx_dst_ifindex: c_int,
+    pub sk_rx_dst_cookie: __u32,
+    pub __bindgen_padding_0: [u8; 32usize],
+    pub sk_drops: atomic_t,
+    pub sk_rcvlowat: c_int,
+    pub sk_error_queue: sk_buff_head,
+    pub sk_receive_queue: sk_buff_head,
+    pub sk_backlog: sock_backlog,
+    pub sk_forward_alloc: c_int,
+    pub sk_reserved_mem: __u32,
+    pub sk_ll_usec: c_uint,
+    pub sk_napi_id: c_uint,
+    pub sk_rcvbuf: c_int,
+    pub sk_disconnects: c_int,
+    pub sk_filter: *mut c_void,
+    pub sk_wq: *mut c_void,
+    pub sk_policy: [*mut c_void; 2usize],
+    pub sk_dst_cache: *mut c_void,
+    pub sk_omem_alloc: atomic_t,
+    pub sk_sndbuf: c_int,
+    pub sk_wmem_queued: c_int,
+    pub sk_wmem_alloc: refcount_t,
+    pub sk_tsq_flags: c_ulong,
+    pub sk_send_head: *mut c_void,
+    pub sk_write_queue: sk_buff_head,
 }
