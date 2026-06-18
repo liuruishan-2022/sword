@@ -301,5 +301,8 @@ pub fn tcp_recvmsg(ctx: ProbeContext) -> u32 {
 }
 
 fn try_tcp_recvmsg(ctx: ProbeContext) -> Result<u32, i64> {
+    unsafe {
+        let sock: *const sock = ctx.arg(0).ok_or(1u32)?;
+    }
     Ok(0)
 }
