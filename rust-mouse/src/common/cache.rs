@@ -217,7 +217,7 @@ mod tests {
         // 验证至少有一些有效数据
         let mut found_valid = false;
         for entry in cache.iter() {
-            let value = entry.value();
+            let value = entry.1;
             if value.is_valid_phone_length() && value.region_id >= 0 && value.region_id < 1000 {
                 found_valid = true;
                 break;
