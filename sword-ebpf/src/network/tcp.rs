@@ -4,6 +4,10 @@ use crate::{
 };
 ///
 /// 对tcp的整个生命周期进行操作
+/// 整个TCP的生命周期如下:
+/// 系统调用阶段：sys_enter_connect
+/// TCP连接: tcp_v4_connect->inet_hash_connect->tcp_connect->tcp_rcv_state_process
+/// 发送数据: sys_enter_write->tcp_sendmsg->tcp_write_xmit->tcp_transmit_skb->ip_queue_xmit->dev_queue_xmit
 ///
 use aya_ebpf::{
     bindings::sockaddr,
@@ -201,6 +205,36 @@ fn try_sys_enter_connect(ctx: TracePointContext) -> Result<u32, i64> {
         info!(&ctx, "查看具體的sa_family:{}!", sa.sa_family);
     }
 
+    Ok(0)
+}
+
+///
+/// name: sys_exit_connect
+/// ID: 1553
+/// format:
+/// 	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+/// 	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+/// 	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+/// 	field:int common_pid;	offset:4;	size:4;	signed:1;
+///
+/// 	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+/// 	field:long ret;	offset:16;	size:8;	signed:1;
+///
+/// print fmt: "0x%lx", REC->ret
+///
+#[tracepoint]
+pub fn sys_exit_connect(ctx: TracePointContext) -> u32 {
+    match try_sys_exit_connect(ctx) {
+        Ok(ret) => ret,
+        Err(err) => err as u32,
+    }
+}
+
+fn try_sys_exit_connect(ctx: TracePointContext) -> Result<u32, i64> {
+    unsafe {
+        let ret = ctx.read_at::<i64>(16)?;
+        info!(&ctx, "返回的函数数据是:{}", ret);
+    }
     Ok(0)
 }
 

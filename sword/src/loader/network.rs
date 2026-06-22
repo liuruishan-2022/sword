@@ -56,6 +56,7 @@ pub fn load_tracepoint(ebpf: &mut aya::Ebpf) -> anyhow::Result<()> {
     load_sys_enter_connect(ebpf)?;
     load_sys_enter_socket(ebpf)?;
     load_sys_exit_socket(ebpf)?;
+    load_sys_exit_connect(ebpf)?;
     Ok(())
 }
 
@@ -63,6 +64,13 @@ fn load_sys_enter_connect(ebpf: &mut aya::Ebpf) -> anyhow::Result<()> {
     let program: &mut TracePoint = ebpf.program_mut("sys_enter_connect").unwrap().try_into()?;
     program.load()?;
     program.attach("syscalls", "sys_enter_connect")?;
+    Ok(())
+}
+
+fn load_sys_exit_connect(ebpf: &mut aya::Ebpf) -> anyhow::Result<()> {
+    let program: &mut TracePoint = ebpf.program_mut("sys_exit_connect").unwrap().try_into()?;
+    program.load()?;
+    program.attach("syscalls", "sys_exit_connect")?;
     Ok(())
 }
 
