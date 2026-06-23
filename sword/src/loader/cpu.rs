@@ -6,6 +6,8 @@ use log::{info, warn};
 use sword_common::SCHED_SWITCH_TARGET_TIDS_MAX_ENTRIES;
 use tokio::time::sleep;
 
+use crate::loader::TracePointConfig;
+
 const SCHED_SWITCH_TARGET_TIDS_MAP: &str = "SCHED_SWITCH_TARGET_TIDS";
 const SCHED_SWITCH_TARGET_TGID_ENV: &str = "SWORD_SCHED_SWITCH_PID";
 const SCHED_SWITCH_TARGET_COMM_ENV: &str = "SWORD_SCHED_SWITCH_COMM";
@@ -241,9 +243,6 @@ fn remove_known_tids(tids_map: &mut AyaHashMap<MapData, u32, u8>, known_tids: &m
 
 pub fn load_sched_switch(ebpf: &mut aya::Ebpf) -> anyhow::Result<()> {
     let target = configure_sched_switch_target_tids(ebpf)?;
-    let program: &mut TracePoint = ebpf.program_mut("sched_switch").unwrap().try_into()?;
-    program.load()?;
-    program.attach("sched", "sched_switch")?;
     if let Some((target, tid_count)) = target {
         info!(
             "attached sched:sched_switch with target {}; loaded {} tids",
@@ -256,6 +255,13 @@ pub fn load_sched_switch(ebpf: &mut aya::Ebpf) -> anyhow::Result<()> {
 }
 
 pub fn load_sched(ebpf: &mut aya::Ebpf) -> anyhow::Result<()> {
+    let trace_points = vec![TracePointConfig::create_sched(
+        "sched_switch",
+        "sched_switch",
+    )];
+    for ele in trace_points {
+        ele.load_tracepoint(ebpf)?;
+    }
     load_sched_switch(ebpf)?;
     Ok(())
 }

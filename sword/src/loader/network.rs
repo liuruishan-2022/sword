@@ -2,35 +2,21 @@
 /// 放置网络相关的loader
 ///
 use aya::maps::{Array, MapData};
-use aya::programs::KProbe;
-use aya::programs::TracePoint;
 use log::info;
 use sword_common::TcpSendmsgTarget;
 
-use crate::loader::LoaderOptions;
+use crate::loader::{KProberConfig, LoaderOptions, TracePointConfig};
 
 const TCP_SENDMSG_TARGET_MAP: &str = "TCP_SENDMSG_TARGET";
 
 pub fn load_network_kprobe(ebpf: &mut aya::Ebpf, options: &LoaderOptions) -> anyhow::Result<()> {
+    let kprobe_configs = vec![KProberConfig::new("tcp_sendmsg", "tcp_sendmsg")];
     if let Some(pid) = options.tcp_sendmsg_pid {
-        load_tcp_sendmsg(ebpf)?;
         configure_tcp_sendmsg_target(ebpf, pid)?;
-        attach_tcp_sendmsg(ebpf)?;
+        for ele in kprobe_configs {
+            ele.load_kprobe(ebpf)?;
+        }
     }
-    Ok(())
-}
-
-fn load_tcp_sendmsg(ebpf: &mut aya::Ebpf) -> anyhow::Result<()> {
-    let program: &mut KProbe = ebpf.program_mut("tcp_sendmsg").unwrap().try_into()?;
-    program.load()?;
-    info!("loaded kprobe:tcp_sendmsg");
-    Ok(())
-}
-
-fn attach_tcp_sendmsg(ebpf: &mut aya::Ebpf) -> anyhow::Result<()> {
-    let program: &mut KProbe = ebpf.program_mut("tcp_sendmsg").unwrap().try_into()?;
-    program.attach("tcp_sendmsg", 0)?;
-    info!("attached kprobe:tcp_sendmsg");
     Ok(())
 }
 
@@ -53,37 +39,16 @@ fn tcp_sendmsg_target(pid: u32) -> TcpSendmsgTarget {
 /// 加載tracepoint
 ///
 pub fn load_tracepoint(ebpf: &mut aya::Ebpf) -> anyhow::Result<()> {
-    load_sys_enter_connect(ebpf)?;
-    load_sys_enter_socket(ebpf)?;
-    load_sys_exit_socket(ebpf)?;
-    load_sys_exit_connect(ebpf)?;
-    Ok(())
-}
+    let tracepoints = vec![
+        TracePointConfig::create_syscalls("sys_enter_connect", "sys_enter_connect"),
+        TracePointConfig::create_syscalls("sys_exit_connect", "sys_exit_connect"),
+        TracePointConfig::create_syscalls("sys_enter_socket", "sys_enter_socket"),
+        TracePointConfig::create_syscalls("sys_exit_socket", "sys_exit_socket"),
+        TracePointConfig::create_sock("inet_sock_set_state", "inet_sock_set_state"),
+    ];
 
-fn load_sys_enter_connect(ebpf: &mut aya::Ebpf) -> anyhow::Result<()> {
-    let program: &mut TracePoint = ebpf.program_mut("sys_enter_connect").unwrap().try_into()?;
-    program.load()?;
-    program.attach("syscalls", "sys_enter_connect")?;
-    Ok(())
-}
-
-fn load_sys_exit_connect(ebpf: &mut aya::Ebpf) -> anyhow::Result<()> {
-    let program: &mut TracePoint = ebpf.program_mut("sys_exit_connect").unwrap().try_into()?;
-    program.load()?;
-    program.attach("syscalls", "sys_exit_connect")?;
-    Ok(())
-}
-
-fn load_sys_enter_socket(ebpf: &mut aya::Ebpf) -> anyhow::Result<()> {
-    let program: &mut TracePoint = ebpf.program_mut("sys_enter_socket").unwrap().try_into()?;
-    program.load()?;
-    program.attach("syscalls", "sys_enter_socket")?;
-    Ok(())
-}
-
-fn load_sys_exit_socket(ebpf: &mut aya::Ebpf) -> anyhow::Result<()> {
-    let program: &mut TracePoint = ebpf.program_mut("sys_exit_socket").unwrap().try_into()?;
-    program.load()?;
-    program.attach("syscalls", "sys_exit_socket")?;
+    for ele in tracepoints {
+        ele.load_tracepoint(ebpf)?;
+    }
     Ok(())
 }

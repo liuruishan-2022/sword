@@ -340,3 +340,74 @@ fn try_tcp_recvmsg(ctx: ProbeContext) -> Result<u32, i64> {
     }
     Ok(0)
 }
+
+///
+/// 捕获TCP连接建立的耗时时长
+/// sudo bpftrace -lv kfunc:tcp_v4_connect
+/// kfunc:vmlinux:tcp_v4_connect
+///     struct sock * sk
+///     struct sockaddr * uaddr
+///     int addr_len
+///     int retval
+///
+
+#[kprobe]
+pub fn tcp_v4_connect(ctx: ProbeContext) -> u32 {
+    match try_tcp_v4_connect(ctx) {
+        Ok(ret) => ret,
+        Err(err) => err as u32,
+    }
+}
+
+fn try_tcp_v4_connect(ctx: ProbeContext) -> Result<u32, i64> {
+    Ok(0)
+}
+
+///
+/// 跟踪 tracepoint:sock:inet_sock_set_state
+/// 利用 (ESTABLISHED) - tcp_v4_connect的时候来获取tcp连接耗时
+///
+/// sudo cat /sys/kernel/debug/tracing/events/sock/inet_sock_set_state/format
+///name: inet_sock_set_state
+///ID: 1603
+///format:
+///	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+///	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+///	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+///	field:int common_pid;	offset:4;	size:4;	signed:1;
+///
+///	field:const void * skaddr;	offset:8;	size:8;	signed:0;
+///	field:int oldstate;	offset:16;	size:4;	signed:1;
+///	field:int newstate;	offset:20;	size:4;	signed:1;
+///	field:__u16 sport;	offset:24;	size:2;	signed:0;
+///	field:__u16 dport;	offset:26;	size:2;	signed:0;
+///	field:__u16 family;	offset:28;	size:2;	signed:0;
+///	field:__u16 protocol;	offset:30;	size:2;	signed:0;
+///	field:__u8 saddr[4];	offset:32;	size:4;	signed:0;
+///	field:__u8 daddr[4];	offset:36;	size:4;	signed:0;
+///	field:__u8 saddr_v6[16];	offset:40;	size:16;	signed:0;
+///	field:__u8 daddr_v6[16];	offset:56;	size:16;	signed:0;
+///
+///print fmt: "family=%s protocol=%s sport=%hu dport=%hu saddr=%pI4 daddr=%pI4 saddrv6=%pI6c daddrv6=%pI6c oldstate=%s newstate=%s", __print_symbolic(REC->family, { 2, "AF_INET" }, { 10, "AF_INET6" }), __print_symbolic(REC->protocol, { 6, "IPPROTO_TCP" }, { 33, "IPPROTO_DCCP" }, { 132, "IPPROTO_SCTP" }, { 262, "IPPROTO_MPTCP" }), REC->sport, REC->dport, REC->saddr, REC->daddr, REC->saddr_v6, REC->daddr_v6, __print_symbolic(REC->oldstate, { 1, "TCP_ESTABLISHED" }, { 2, "TCP_SYN_SENT" }, { 3, "TCP_SYN_RECV" }, { 4, "TCP_FIN_WAIT1" }, { 5, "TCP_FIN_WAIT2" }, { 6, "TCP_TIME_WAIT" }, { 7, "TCP_CLOSE" }, { 8, "TCP_CLOSE_WAIT" }, { 9, "TCP_LAST_ACK" }, { 10, "TCP_LISTEN" }, { 11, "TCP_CLOSING" }, { 12, "TCP_NEW_SYN_RECV" }), __print_symbolic(REC->newstate, { 1, "TCP_ESTABLISHED" }, { 2, "TCP_SYN_SENT" }, { 3, "TCP_SYN_RECV" }, { 4, "TCP_FIN_WAIT1" }, { 5, "TCP_FIN_WAIT2" }, { 6, "TCP_TIME_WAIT" }, { 7, "TCP_CLOSE" }, { 8, "TCP_CLOSE_WAIT" }, { 9, "TCP_LAST_ACK" }, { 10, "TCP_LISTEN" }, { 11, "TCP_CLOSING" }, { 12, "TCP_NEW_SYN_RECV" })
+///
+
+#[tracepoint]
+pub fn inet_sock_set_state(ctx: TracePointContext) -> u32 {
+    match try_inet_sock_set_state(ctx) {
+        Ok(ret) => ret,
+        Err(err) => err as u32,
+    }
+}
+
+fn try_inet_sock_set_state(ctx: TracePointContext) -> Result<u32, i64> {
+    unsafe {
+        let skaddr = ctx.read_at::<u64>(8)?;
+        let old_state = ctx.read_at::<i32>(16)?;
+        let new_state = ctx.read_at::<i32>(20)?;
+        info!(
+            &ctx,
+            "Socket:{} 旧状态:{} 新状态:{}!", skaddr, old_state, new_state
+        );
+    }
+    Ok(0)
+}

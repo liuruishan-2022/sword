@@ -1,21 +1,15 @@
 use aya::programs::TracePoint;
 
-pub fn load_sys_enter_open(ebpf: &mut aya::Ebpf) -> anyhow::Result<()> {
-    let program: &mut TracePoint = ebpf.program_mut("sys_enter_open").unwrap().try_into()?;
-    program.load()?;
-    program.attach("syscalls", "sys_enter_open")?;
-    Ok(())
-}
-
-pub fn load_sys_enter_openat(ebpf: &mut aya::Ebpf) -> anyhow::Result<()> {
-    let program: &mut TracePoint = ebpf.program_mut("sys_enter_openat").unwrap().try_into()?;
-    program.load()?;
-    program.attach("syscalls", "sys_enter_openat")?;
-    Ok(())
-}
+use crate::loader::TracePointConfig;
 
 pub fn load_io(ebpf: &mut aya::Ebpf) -> anyhow::Result<()> {
-    load_sys_enter_open(ebpf)?;
-    //load_sys_enter_openat(ebpf)?;
+    let trace_points = vec![
+        TracePointConfig::create_syscalls("sys_enter_open", "sys_enter_open"),
+        TracePointConfig::create_syscalls("sys_enter_openat", "sys_enter_openat"),
+    ];
+
+    for ele in trace_points {
+        ele.load_tracepoint(ebpf)?;
+    }
     Ok(())
 }
