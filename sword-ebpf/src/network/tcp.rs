@@ -10,10 +10,13 @@ use crate::{
 /// 发送数据: sys_enter_write->tcp_sendmsg->tcp_write_xmit->tcp_transmit_skb->ip_queue_xmit->dev_queue_xmit
 ///
 use aya_ebpf::{
-    bindings::sockaddr,
-    helpers::{bpf_get_current_pid_tgid, bpf_probe_read_kernel, bpf_probe_read_user},
+    bindings::{BPF_TCP_ESTABLISHED, BPF_TCP_SYN_SENT, sockaddr},
+    helpers::{
+        bpf_get_current_pid_tgid, bpf_probe_read_kernel, bpf_probe_read_user,
+        generated::bpf_ktime_get_ns,
+    },
     macros::{kprobe, map, tracepoint},
-    maps::{Array, PerCpuHashMap},
+    maps::{Array, HashMap, PerCpuHashMap},
     programs::{ProbeContext, TracePointContext},
 };
 use aya_log_ebpf::info;
@@ -27,6 +30,9 @@ pub static TARGET_PID: Array<TargetPid> = Array::with_max_entries(1, 0);
 
 #[map]
 pub static SYS_ENTER_CONNECT: PerCpuHashMap<u32, u64> = PerCpuHashMap::with_max_entries(4096, 0);
+
+#[map]
+pub static START: HashMap<u64, u64> = HashMap::with_max_entries(4096, 0);
 
 ///
 /// kfunc:vmlinux:tcp_sendmsg
@@ -364,6 +370,11 @@ fn try_tcp_v4_connect(ctx: ProbeContext) -> Result<u32, u64> {
         return Ok(0);
     }
     let sock = ctx.arg::<u64>(0).ok_or(1u64)?;
+    let start_time = unsafe { bpf_ktime_get_ns() };
+    let is_ok = START.insert(&sock, start_time, 0);
+    if is_ok.is_err() {
+        return Err(is_ok.unwrap_err() as u64);
+    }
     info!(&ctx, "抓取到一个sock信息:{}!", sock);
     Ok(0)
 }
@@ -405,18 +416,26 @@ pub fn inet_sock_set_state(ctx: TracePointContext) -> u32 {
 }
 
 fn try_inet_sock_set_state(ctx: TracePointContext) -> Result<u32, i64> {
-    if !matches_tcp_sendmsg_target()? {
-        return Ok(0);
-    }
     unsafe {
         // void * 这个其实是sock类型的指针
         let skaddr = ctx.read_at::<u64>(8)?;
-        let old_state = ctx.read_at::<i32>(16)?;
-        let new_state = ctx.read_at::<i32>(20)?;
-        info!(
-            &ctx,
-            "Socket:{} 旧状态:{} 新状态:{}!", skaddr, old_state, new_state
-        );
+        let old_state = ctx.read_at::<u32>(16)?;
+        let new_state = ctx.read_at::<u32>(20)?;
+
+        if old_state == BPF_TCP_SYN_SENT && new_state == BPF_TCP_ESTABLISHED {
+            if let Some(start_ns) = START.get(&skaddr) {
+                let current_ns = bpf_ktime_get_ns();
+                let cost_ns = current_ns - start_ns;
+                info!(
+                    &ctx,
+                    "Socket:{} 旧状态:{} 新状态:{} 耗时为:{}ms!",
+                    skaddr,
+                    old_state,
+                    new_state,
+                    cost_ns / 1000000
+                );
+            }
+        }
     }
     Ok(0)
 }
