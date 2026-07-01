@@ -420,3 +420,116 @@ fn try_inet_sock_set_state(ctx: TracePointContext) -> Result<u32, i64> {
     }
     Ok(0)
 }
+
+///
+/// 跟蹤tracepoint sys_enter_accept/accept4
+///
+/// name: sys_enter_accept
+/// ID: 1676
+/// format:
+/// 	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+/// 	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+/// 	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+/// 	field:int common_pid;	offset:4;	size:4;	signed:1;
+///
+/// 	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+/// 	field:int fd;	offset:16;	size:8;	signed:0;
+/// 	field:struct sockaddr * upeer_sockaddr;	offset:24;	size:8;	signed:0;
+/// 	field:int * upeer_addrlen;	offset:32;	size:8;	signed:0;
+///
+/// print fmt: "fd: 0x%08lx, upeer_sockaddr: 0x%08lx, upeer_addrlen: 0x%08lx", ((unsigned long)(REC->fd)), ((unsigned long)(REC->upeer_sockaddr)), ((unsigned long)(REC->upeer_addrlen))
+///
+
+#[tracepoint]
+pub fn sys_enter_accept(ctx: TracePointContext) -> u32 {
+    match try_sys_enter_accept(ctx) {
+        Ok(ret) => ret as u32,
+        Err(err) => err as u32,
+    }
+}
+
+fn try_sys_enter_accept(ctx: TracePointContext) -> Result<i32, u64> {
+    Ok(0)
+}
+
+///
+/// 跟蹤 sys_enter_accept4
+///
+/// name: sys_enter_accept4
+/// ID: 1678
+/// format:
+/// 	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+/// 	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+/// 	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+/// 	field:int common_pid;	offset:4;	size:4;	signed:1;
+///
+/// 	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+/// 	field:int fd;	offset:16;	size:8;	signed:0;
+/// 	field:struct sockaddr * upeer_sockaddr;	offset:24;	size:8;	signed:0;
+/// 	field:int * upeer_addrlen;	offset:32;	size:8;	signed:0;
+/// 	field:int flags;	offset:40;	size:8;	signed:0;
+///
+/// print fmt: "fd: 0x%08lx, upeer_sockaddr: 0x%08lx, upeer_addrlen: 0x%08lx, flags: 0x%08lx", ((unsigned long)(REC->fd)), ((unsigned long)(REC->upeer_sockaddr)), ((unsigned long)(REC->upeer_addrlen)), ((unsigned long)(REC->flags))
+///
+
+#[tracepoint]
+pub fn sys_enter_accept4(ctx: TracePointContext) -> u32 {
+    match try_sys_enter_accept4(ctx) {
+        Ok(ret) => ret as u32,
+        Err(err) => err as u32,
+    }
+}
+
+fn try_sys_enter_accept4(ctx: TracePointContext) -> Result<i32, u64> {
+    Ok(0)
+}
+
+///
+/// 跟蹤對應的exit系列的方法
+///
+/// name: sys_exit_accept4
+/// ID: 1677
+/// format:
+/// 	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+/// 	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+/// 	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+/// 	field:int common_pid;	offset:4;	size:4;	signed:1;
+///
+/// 	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+/// 	field:long ret;	offset:16;	size:8;	signed:1;
+///
+/// print fmt: "0x%lx", REC->ret
+///
+/// name: sys_exit_accept
+/// ID: 1675
+/// format:
+/// 	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+/// 	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+/// 	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+/// 	field:int common_pid;	offset:4;	size:4;	signed:1;
+///
+/// 	field:int __syscall_nr;	offset:8;	size:4;	signed:1;
+/// 	field:long ret;	offset:16;	size:8;	signed:1;
+///
+/// print fmt: "0x%lx", REC->ret
+///
+
+#[tracepoint]
+pub fn sys_exit_accept(ctx: TracePointContext) -> u32 {
+    match try_sys_exit_accept(ctx) {
+        Ok(ret) => ret,
+        Err(err) => err as u32,
+    }
+}
+
+#[tracepoint]
+pub fn sys_exit_accept4(ctx: TracePointContext) -> u32 {
+    match try_sys_exit_accept(ctx) {
+        Ok(ret) => ret,
+        Err(err) => err as u32,
+    }
+}
+
+fn try_sys_exit_accept(ctx: TracePointContext) -> Result<u32, i64> {
+    Ok(0)
+}
