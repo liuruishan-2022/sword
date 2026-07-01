@@ -27,7 +27,7 @@ pub struct ThreadOffCpuStart {
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
-pub struct TcpSendmsgTarget {
+pub struct TargetPid {
     pub pid: u32,
     pub _pad: u32,
 }
@@ -42,4 +42,4 @@ unsafe impl aya::Pod for ThreadComm {}
 unsafe impl aya::Pod for ThreadOffCpuStart {}
 
 #[cfg(feature = "user")]
-unsafe impl aya::Pod for TcpSendmsgTarget {}
+unsafe impl aya::Pod for TargetPid {}

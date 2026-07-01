@@ -17,13 +17,13 @@ use aya_ebpf::{
     programs::{ProbeContext, TracePointContext},
 };
 use aya_log_ebpf::info;
-use sword_common::TcpSendmsgTarget;
+use sword_common::TargetPid;
 
 const AF_INET: u16 = 2;
 const AF_INET6: u16 = 10;
 
 #[map]
-pub static TCP_SENDMSG_TARGET: Array<TcpSendmsgTarget> = Array::with_max_entries(1, 0);
+pub static TARGET_PID: Array<TargetPid> = Array::with_max_entries(1, 0);
 
 #[map]
 pub static SYS_ENTER_CONNECT: PerCpuHashMap<u32, u64> = PerCpuHashMap::with_max_entries(4096, 0);
@@ -150,7 +150,7 @@ fn ipv4_octet(addr: u32, index: u32) -> u32 {
 }
 
 fn matches_tcp_sendmsg_target() -> Result<bool, u32> {
-    let target = TCP_SENDMSG_TARGET.get(0).ok_or(1u32)?;
+    let target = TARGET_PID.get(0).ok_or(1u32)?;
     let current_pid = (bpf_get_current_pid_tgid() >> 32) as u32;
 
     Ok(current_pid == target.pid)
@@ -359,7 +359,12 @@ pub fn tcp_v4_connect(ctx: ProbeContext) -> u32 {
     }
 }
 
-fn try_tcp_v4_connect(ctx: ProbeContext) -> Result<u32, i64> {
+fn try_tcp_v4_connect(ctx: ProbeContext) -> Result<u32, u64> {
+    if !matches_tcp_sendmsg_target()? {
+        return Ok(0);
+    }
+    let sock = ctx.arg::<u64>(0).ok_or(1u64)?;
+    info!(&ctx, "抓取到一个sock信息:{}!", sock);
     Ok(0)
 }
 
@@ -400,7 +405,11 @@ pub fn inet_sock_set_state(ctx: TracePointContext) -> u32 {
 }
 
 fn try_inet_sock_set_state(ctx: TracePointContext) -> Result<u32, i64> {
+    if !matches_tcp_sendmsg_target()? {
+        return Ok(0);
+    }
     unsafe {
+        // void * 这个其实是sock类型的指针
         let skaddr = ctx.read_at::<u64>(8)?;
         let old_state = ctx.read_at::<i32>(16)?;
         let new_state = ctx.read_at::<i32>(20)?;

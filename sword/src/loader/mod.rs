@@ -20,17 +20,18 @@ impl LoaderOptions {
 
         while let Some(arg) = args.next() {
             match arg.as_str() {
-                "--tcp-sendmsg-pid" => {
+                "--target-pid" => {
                     let value = args
                         .next()
-                        .ok_or_else(|| anyhow::anyhow!("--tcp-sendmsg-pid requires a value"))?;
-                    let pid = value.parse::<u32>().map_err(|err| {
-                        anyhow::anyhow!("invalid --tcp-sendmsg-pid {value}: {err}")
-                    })?;
+                        .ok_or_else(|| anyhow::anyhow!("--target-pid requires a value"))?;
+                    info!("获取到的pid为:{}!", value);
+                    let pid = value
+                        .parse::<u32>()
+                        .map_err(|err| anyhow::anyhow!("invalid --target-pid {value}: {err}"))?;
                     tcp_sendmsg_pid = Some(pid);
                 }
                 "--help" | "-h" => {
-                    println!("Usage: sword [--tcp-sendmsg-pid PID]");
+                    println!("Usage: sword [--target-pid PID]");
                     std::process::exit(0);
                 }
                 _ => return Err(anyhow::anyhow!("unknown argument: {arg}")),
@@ -148,6 +149,7 @@ impl KProberConfig {
 
     pub fn load_kprobe(&self, ebpf: &mut Ebpf) -> anyhow::Result<()> {
         let program: &mut KProbe = ebpf.program_mut(&self.name()).unwrap().try_into()?;
+        program.load()?;
         program.attach(self.fn_name(), 0)?;
         info!("load kprobe:{} {}", self.name(), self.fn_name());
         Ok(())
