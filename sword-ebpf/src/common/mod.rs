@@ -1,4 +1,4 @@
-use aya_ebpf::helpers::bpf_get_current_pid_tgid;
+use aya_ebpf::helpers::{bpf_get_current_pid_tgid, generated::bpf_get_current_cgroup_id};
 
 ///
 /// 增加一些工具性质的东西,可以很方便的获取一些数据或者是信息
@@ -33,4 +33,14 @@ pub fn byte_to_str<const N: usize>(bytes: &[u8; N]) -> &str {
         len = i + 1;
     }
     unsafe { str::from_utf8_unchecked(&bytes[..len]) }
+}
+
+///
+/// 获取cgroup id信息
+///
+pub fn cgroup_id() -> u64 {
+    unsafe {
+        let cg_id = bpf_get_current_cgroup_id();
+        return cg_id;
+    }
 }

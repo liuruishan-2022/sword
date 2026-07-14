@@ -1,69 +1,65 @@
-# 从 eBPF Map 到 Prometheus：如何导出观测指标
+# 用 eBPF 统计打开文件次数，并导出给 Prometheus
 
-做 eBPF 观测时，很多人第一版都会从日志开始。
+线上排查问题时，文件打开这件事经常会被忽略。
 
-比如在 `tcp_sendmsg` 里打印一次发送字节数，在 `sched_switch` 里打印一次线程切换，在 `inet_sock_set_state` 里打印一次连接状态变化。这样验证功能很方便：事件来了，日志就出来了。
+服务变慢了，我们会先看 CPU、内存、GC、接口耗时；怀疑文件句柄问题时，再临时上去敲 `lsof`。但 `lsof` 看到的是某一刻的状态，它回答不了另一个问题：这段时间里，程序到底有没有频繁打开文件？
 
-但日志不是长期观测的好形态。
+如果只是想验证 eBPF 程序有没有抓到事件，最直接的办法是在 `open` 相关 hook 里打日志。这个办法开发时很方便，但跑一会儿就会发现日志太吵。文件打开事件本身可能非常高频，全部打印出来，既看不出趋势，也不适合长期放在线上。
 
-日志适合看细节，不适合看趋势。我们很难从刷屏日志里回答这些问题：
+所以这里换一种方式：不打印每次事件，只维护一个计数器，再把这个计数器暴露成 Prometheus 指标。
 
-- 最近 5 分钟某个进程发起了多少次 TCP 连接？
-- 每个 CPU 上调度切换次数是否异常？
-- 某个线程 off-cpu 时间是否持续增长？
-- 这些数据能不能接入 Grafana 做图？
-
-所以当 eBPF 程序从“实验验证”进入“持续观测”，就需要把日志变成指标。
-
-一种常见做法是采用 Prometheus 导出方式：eBPF 侧把数据写入 map，用户态定期读取 map，再通过 HTTP `/metrics` 输出 OpenMetrics 文本。
-
-本文就沿着这个链路展开。
-
-## 第一步：为什么不能只靠 eBPF 日志
-
-在 Aya 里，eBPF 程序可以通过 `aya_log_ebpf::info!` 打印日志。
-
-例如网络发送方向可以输出：
+这篇文章只看一个指标：
 
 ```text
-tcp_sendmsg pid=12345 tid=12345 family=ipv4 src=10.0.0.1:50000 dst=1.2.3.4:443 size=1280
+sys_enter_open_total
 ```
 
-连接耗时可以输出：
+它表示系统进入打开文件相关系统调用的累计次数。因为底层用的是 per-CPU 计数，所以导出时会带上 CPU 维度：
 
 ```text
-Socket:123456 旧状态:2 新状态:1 耗时为:23ms
+sys_enter_open_total{cpu="0"} 123
+sys_enter_open_total{cpu="1"} 98
 ```
 
-这些日志对于开发阶段很有用，因为它能直接证明 hook 点生效了，也能看到字段解析是否正确。
+这不是“当前打开了多少个 fd”，而是“发生过多少次打开文件动作”。两者含义不同，后者更适合用 tracepoint 做低成本计数。
 
-但日志有几个天然问题：
+## 先抓哪些事件
 
-- 高频事件会刷屏，人工很难读。
-- 事件粒度太细，不方便直接看总量和趋势。
-- 日志格式不稳定，不适合给监控系统消费。
-- 长期保留日志成本高，还可能带来隐私和合规风险。
-
-所以日志应该作为调试手段，而不是最终观测产品形态。
-
-更好的方式是让 eBPF 侧只做轻量聚合，用户态负责把聚合结果导出成指标。
-
-## 第二步：先在 eBPF 侧用 Map 聚合
-
-eBPF 程序不能随便分配内存，也不适合做复杂业务逻辑。它最适合做的事情是：
+打开文件通常会经过这些系统调用：
 
 ```text
-事件发生 -> 读取少量字段 -> 更新 map -> 返回
+open
+openat
+openat2
 ```
 
-以文件打开次数为例，可以使用 `PerCpuArray` 统计：
+对应到 tracepoint，就是：
+
+```text
+syscalls:sys_enter_open
+syscalls:sys_enter_openat
+syscalls:sys_enter_openat2
+```
+
+这里挂在 `sys_enter_*` 上，只统计“尝试打开文件”的次数，不关心这次打开最终成功还是失败。
+
+如果要区分成功失败，就需要再看退出点和返回值。本文先不做这一步，避免把问题扩大。先把一个计数指标跑通，比一开始就设计一堆维度更稳。
+
+## eBPF 侧只做计数
+
+内核态逻辑越简单越好。这个需求里，eBPF 程序只需要在事件触发时把计数器加一。
+
+Map 定义如下：
 
 ```rust
 #[map]
-pub static SYS_ENTER_OPEN_COUNTER: PerCpuArray<u64> = PerCpuArray::with_max_entries(1, 0);
+pub static SYS_ENTER_OPEN_COUNTER: PerCpuArray<u64> =
+    PerCpuArray::with_max_entries(1, 0);
 ```
 
-每次触发 `sys_enter_open`、`sys_enter_openat`、`sys_enter_openat2` 时，计数器加一：
+这里用 `PerCpuArray`，不是普通数组。原因很直接：打开文件事件可能在多个 CPU 上同时发生，如果大家都更新同一个计数器，会有不必要的竞争。per-CPU 计数让每个 CPU 写自己的那份，用户态读取时再按 CPU 拿出来。
+
+计数函数也很短：
 
 ```rust
 fn inc_sys_enter_open_counter() {
@@ -75,389 +71,227 @@ fn inc_sys_enter_open_counter() {
 }
 ```
 
-CPU 调度事件也是类似思路：
+三个 tracepoint 程序都调用它：
 
 ```rust
-#[map]
-pub static SCHED_SWITCH_TOTAL: PerCpuArray<u64> = PerCpuArray::with_max_entries(1, 0);
-```
+#[tracepoint]
+pub fn sys_enter_open(_ctx: TracePointContext) -> u32 {
+    inc_sys_enter_open_counter();
+    0
+}
 
-每次 `sched_switch` 事件进来，当前 CPU 上的计数加一：
+#[tracepoint]
+pub fn sys_enter_openat(_ctx: TracePointContext) -> u32 {
+    inc_sys_enter_open_counter();
+    0
+}
 
-```rust
-if let Some(total) = SCHED_SWITCH_TOTAL.get_ptr_mut(0) {
-    *total = (*total).wrapping_add(1);
+#[tracepoint]
+pub fn sys_enter_openat2(_ctx: TracePointContext) -> u32 {
+    inc_sys_enter_open_counter();
+    0
 }
 ```
 
-这里用 `PerCpuArray` 的好处是减少多 CPU 并发更新同一个计数器带来的竞争。用户态读取时，再把每个 CPU 的值汇总或按 CPU 分标签输出。
+到这里，内核态已经结束了。它不拼字符串，不做 HTTP，不关心 Prometheus，只负责把事件数记下来。
 
-对于按线程维度的指标，可以使用 `HashMap`：
+## 用户态把 Map 拿出来
 
-```rust
-#[map]
-pub static THREAD_OFFCPU_TOTAL_NS: HashMap<SchedSwitchStateKey, u64> =
-    HashMap::with_max_entries(SCHED_SWITCH_THREAD_STATE_MAX_ENTRIES, 0);
-```
-
-key 是线程 ID 和状态，value 是累计 off-cpu 时间。
-
-到这里，eBPF 侧只负责把“瞬时事件”变成“可读取的聚合数据”。
-
-## 第三步：用户态接管 Map
-
-eBPF map 里的数据不能直接被 Prometheus 抓取。Prometheus 抓的是 HTTP 文本接口，所以需要用户态程序做中间层。
-
-用户态入口通常会先加载 eBPF object，再启动指标导出服务：
-
-```rust
-let mut ebpf = aya::Ebpf::load(aya::include_bytes_aligned!(concat!(
-    env!("OUT_DIR"),
-    "/ebpf-observer"
-)))?;
-
-loader::load_ebpf(&mut ebpf, &options)?;
-metrics::spawn_prometheus_exporter(&mut ebpf).await?;
-```
-
-这里的顺序是：
+Prometheus 不认识 eBPF Map。它能抓的是 HTTP 接口，通常就是：
 
 ```text
-加载 eBPF object
-    -> attach tracepoint/kprobe
-    -> 启动 Prometheus exporter
+GET /metrics
 ```
 
-指标导出入口可以这样设计：
+所以用户态需要做一层转换：从 eBPF Map 里读数，再写成 Prometheus 能理解的文本。
+
+启动时先从 `Ebpf` 对象里取出 `SYS_ENTER_OPEN_COUNTER`：
 
 ```rust
-pub async fn spawn_prometheus_exporter(ebpf: &mut aya::Ebpf) -> anyhow::Result<()> {
-    let map = ebpf
-        .take_map(SCHED_SWITCH_TOTAL_MAP)
-        .ok_or_else(|| anyhow::anyhow!("map {SCHED_SWITCH_TOTAL_MAP} not found"))?;
-    let sched_switch_total_map: PerCpuArray<MapData, u64> = PerCpuArray::try_from(map)?;
+let map = ebpf
+    .take_map(SYS_ENTER_OPEN_COUNTER_MAP)
+    .ok_or_else(|| anyhow::anyhow!("map {SYS_ENTER_OPEN_COUNTER_MAP} not found"))?;
 
-    // 继续 take 其他 map...
-}
+let sys_enter_open: PerCpuArray<MapData, u64> =
+    PerCpuArray::try_from(map)?;
 ```
 
-注意这里用的是 `take_map`，不是只借用 map。用户态把 map 从 `Ebpf` 对象里取出来，交给 collector 持有。
+取出来之后，这个 `PerCpuArray` 就交给 collector 持有。Prometheus 每次来抓 `/metrics`，collector 就读一次最新值。
 
-然后分别创建 CPU 和 Network collector：
+## 指标怎么定义
 
-```rust
-let cpu_state = CpuCollector::new(
-    sched_switch_total_map,
-    sys_enter_open_counter_map,
-    thread_switch_out_total_map,
-    thread_offcpu_total_ns_map,
-    thread_comm_map,
-);
-let network_state = NetworkCollector::new(sys_enter_connect_map);
+指标名用：
+
+```text
+sys_enter_open_total
 ```
 
-这样每个 collector 都只关心自己的 map 和指标转换逻辑。
-
-## 第四步：用 prometheus-client 定义指标
-
-Prometheus 指标不是随便拼字符串。可以使用 `prometheus-client` 这个 crate 定义 Registry、Family、Gauge 和 Label。
-
-以 CPU 指标为例，先定义标签：
+标签先只放一个 `cpu`：
 
 ```rust
 #[derive(Clone, Debug, Hash, PartialEq, Eq, EncodeLabelSet)]
-pub struct SchedSwitchLabels {
-    cpu: u32,
+struct OpenFileLabels {
+    cpu: String,
 }
 ```
 
-这个结构体表示指标标签：
-
-```text
-cpu="<cpu_id>"
-```
-
-指标定义：
-
-```rust
-pub struct CpuMetrics {
-    sched_switch_total: Family<SchedSwitchLabels, Gauge<u64, AtomicU64>>,
-    sys_enter_open_total: Family<SchedSwitchLabels, Gauge<u64, AtomicU64>>,
-    thread_sched_switch_out_total: Family<ThreadStateLabels, Gauge<u64, AtomicU64>>,
-    thread_offcpu_ns_total: Family<ThreadStateLabels, Gauge<u64, AtomicU64>>,
-}
-```
-
-初始化时注册到 `Registry`：
+注册指标：
 
 ```rust
 registry.register(
-    "sched_switch_total",
-    "Total number of sched_switch events per CPU",
-    sched_switch_total.clone(),
+    "sys_enter_open_total",
+    "Total number of sys_enter_open events per CPU",
+    sys_enter_open_total.clone(),
 );
 ```
 
-这一步完成了从“Rust 变量”到“Prometheus 指标定义”的转换。
+这里实现上可以用 `Gauge`，虽然名字带 `_total`。
 
-网络指标同理：
-
-```rust
-#[derive(Clone, Debug, Hash, PartialEq, Eq, EncodeLabelSet)]
-pub struct TcpLabels {
-    pid: u32,
-}
-```
-
-指标名是：
+原因是 eBPF Map 里已经是累计值。每次抓取时，用户态只是把 Map 当前值设置到指标里：
 
 ```text
-network_tcp_pid_total
+Map 当前累计值是多少，/metrics 就暴露多少
 ```
 
-它的目标是按 PID 暴露 TCP connect 总量。
+如果这里用 Counter 再 `inc`，反而容易在每次 scrape 时重复累加同一份数据。这个地方用 Gauge 承载累计值，查询时照样可以用 `rate()` 看增长速度。
 
-## 第五步：Collector 把 Map 数据刷新到指标
+## 每次抓取时读一次 Map
 
-指标对象创建之后，还需要把 eBPF map 里的值读出来。
-
-CPU collector 的核心逻辑是 `collect`：
+collector 读取 key `0`，拿到每个 CPU 的计数：
 
 ```rust
-pub async fn collect(&self) -> Result<(), MapError> {
-    let sched_switch_cpus = self.sched_switch.get(&0, 0)?;
-    sched_switch_cpus
-        .iter()
-        .enumerate()
-        .for_each(|(index, count)| {
-            self.cpu.inc_sched_switch_total(index as u32, *count);
-        });
+let sys_enter_open_cpus = self.sys_enter_open.get(&0, 0)?;
 
-    let sys_enter_open_cpus = self.sys_enter_open.get(&0, 0)?;
-    sys_enter_open_cpus
-        .iter()
-        .enumerate()
-        .for_each(|(index, count)| {
-            self.cpu.inc_sys_enter_open_total(index as u32, *count);
-        });
-
-    Ok(())
+for (index, count) in sys_enter_open_cpus.iter().enumerate() {
+    self.inc_sys_enter_open_total(index as u32, *count);
 }
 ```
 
-这里做了两件事：
-
-1. 从 eBPF map 读取当前值。
-2. 写入 prometheus-client 的 Gauge。
-
-对 `PerCpuArray` 来说，读取出来的是每个 CPU 一份值，所以这里按 CPU 下标输出标签。
-
-线程级指标则从 `HashMap` 遍历：
+写入 Prometheus 指标：
 
 ```rust
-for item in self.thread_offcpu.iter() {
-    let (key, ns) = item?;
-    let comm = self.thread_comm(key.tid);
-    let state = sched_switch_state_label(key.state);
-    self.cpu
-        .set_thread_offcpu_ns_total(key.tid, comm, state, ns);
+fn inc_sys_enter_open_total(&self, cpu: u32, total: u64) {
+    self.sys_enter_open_total
+        .get_or_create(&OpenFileLabels {
+            cpu: cpu.to_string(),
+        })
+        .set(total);
 }
 ```
 
-这一步会把 eBPF 侧的数字翻译成更适合人读的标签，例如线程名和任务状态。
+最后导出的效果大概是：
 
-网络 collector 也是类似模式：
-
-```rust
-for item in self.sys_enter_connect.iter() {
-    let (pid, counts) = item?;
-    if !pid_exists(pid) {
-        stale_pids.push(pid);
-        continue;
-    }
-
-    let total = counts.iter().copied().sum();
-    self.network.pid_tcp_total(pid, total);
-}
+```text
+sys_enter_open_total{cpu="0"} 123
+sys_enter_open_total{cpu="1"} 98
+sys_enter_open_total{cpu="2"} 76
+sys_enter_open_total{cpu="3"} 81
 ```
 
-这里还有一个细节：如果 PID 已经不存在，就把对应 map 和指标清理掉，避免 `/metrics` 长期保留过期进程。
+如果想看整机总量，PromQL 里再聚合：
 
-## 第六步：用 Axum 暴露 /metrics
+```promql
+sum(sys_enter_open_total)
+```
 
-有了 Registry 和 Collector，还需要一个 HTTP 接口。
+如果想看最近 5 分钟的增长速度：
 
-用户态可以启动一个 Axum 服务：
+```promql
+sum(rate(sys_enter_open_total[5m]))
+```
+
+## 暴露 /metrics
+
+HTTP 部分不用复杂，提供 `/metrics` 和 `/health` 就够了：
 
 ```rust
-let app = Router::new()
+Router::new()
     .route("/metrics", get(metrics_handler))
     .route("/health", get(health_handler))
-    .with_state(exporter_state);
-let listener = TcpListener::bind("0.0.0.0:9898").await?;
 ```
 
-`/health` 用来做健康检查：
+`/metrics` 处理时，先采集，再编码：
 
 ```rust
-async fn health_handler() -> impl IntoResponse {
-    Response::builder()
-        .status(StatusCode::OK)
-        .body(Body::from("ok"))
-        .unwrap()
+async fn metrics_handler(State(state): State<MetricsState>) -> impl IntoResponse {
+    state.collect();
+
+    let mut buffer = String::new();
+    encode(&mut buffer, &state.registry)?;
+
+    (
+        [(CONTENT_TYPE, "application/openmetrics-text; version=1.0.0; charset=utf-8")],
+        buffer,
+    )
 }
 ```
 
-`/metrics` 每次被请求时，都会触发一次采集：
+这个顺序不要反过来。先 `collect()`，才能把 eBPF Map 里的最新值刷到 registry；再 `encode()`，Prometheus 看到的才是这次抓取时的结果。
 
-```rust
-async fn metrics_handler(
-    State(metrics_state): State<Arc<Mutex<MetricsState>>>,
-) -> impl IntoResponse {
-    match metrics_state.lock().await.metrics().await {
-        Ok(metrics) => Response::builder()
-            .header(
-                CONTENT_TYPE,
-                "application/openmetrics-text;version=1.0.0; charset=utf-8",
-            )
-            .body(Body::from(metrics))
-            .unwrap(),
-        Err(err) => {
-            error!("failed to collect metrics: {err}");
-            Response::builder()
-                .status(StatusCode::INTERNAL_SERVER_ERROR)
-                .body(Body::from("failed to collect metrics"))
-                .unwrap()
-        }
-    }
-}
-```
+## 本地怎么确认
 
-这里的设计是“按请求采集”，不是后台定时采集。
-
-也就是说：
-
-```text
-Prometheus scrape /metrics
-    -> handler 读取 eBPF map
-    -> collector 更新 Registry
-    -> encode 成 OpenMetrics 文本
-    -> 返回 HTTP 响应
-```
-
-这种方式实现简单，也符合 Prometheus 的 pull 模型。
-
-## 第七步：多个 Registry 如何合并
-
-一种拆分方式是让 CPU collector 和 Network collector 各自持有一个 `Registry`。
-
-最终 `/metrics` 需要把它们合并输出：
-
-```rust
-impl MetricsState {
-    async fn metrics(&mut self) -> anyhow::Result<String> {
-        let mut metrics = trim_openmetrics_eof(self.cpu.metrics().await?);
-        metrics.push_str(&trim_openmetrics_eof(self.network.metrics().await?));
-        metrics.push_str("# EOF\n");
-        Ok(metrics)
-    }
-}
-```
-
-这里有一个小处理：`prometheus-client` 编码出来的 OpenMetrics 文本末尾会带 `# EOF`。多个 Registry 拼接时，不能每段都保留 EOF，所以先去掉每段末尾的 EOF，最后统一补一个。
-
-处理函数是：
-
-```rust
-fn trim_openmetrics_eof(mut metrics: String) -> String {
-    const EOF_MARKER: &str = "# EOF\n";
-    if metrics.ends_with(EOF_MARKER) {
-        metrics.truncate(metrics.len() - EOF_MARKER.len());
-    }
-    metrics
-}
-```
-
-这个细节很实用。否则 `/metrics` 里出现多个 EOF，Prometheus 解析可能会出问题。
-
-## 当前可以看到哪些指标
-
-启动后可以访问：
-
-```bash
-curl -s http://127.0.0.1:9898/metrics
-```
-
-当前代码中，比较明确的指标包括：
-
-```text
-sched_switch_total{cpu="0"} ...
-sys_enter_open_total{cpu="0"} ...
-thread_sched_switch_out_total{tid="...",comm="...",state="..."} ...
-thread_offcpu_ns_total{tid="...",comm="...",state="..."} ...
-network_tcp_pid_total{pid="..."} ...
-```
-
-需要注意，`network_tcp_pid_total` 的数据来源是 `SYS_ENTER_CONNECT` map。
-
-如果 `sys_enter_connect` tracepoint 加载还处于注释状态：
-
-```rust
-// TracePointConfig::create_syscalls("sys_enter_connect", "sys_enter_connect"),
-```
-
-所以这个网络指标的链路设计已经在，但要让它真实增长，需要恢复这个 tracepoint 的 attach。
-
-## 运行和验证
-
-构建并运行：
-
-```bash
-sudo RUST_LOG=info cargo run --release -- --target-pid <PID>
-```
-
-检查 exporter 是否正常：
+服务启动后，先看健康检查：
 
 ```bash
 curl -s http://127.0.0.1:9898/health
 ```
 
-查看指标：
+再看指标：
 
 ```bash
-curl -s http://127.0.0.1:9898/metrics
+curl -s http://127.0.0.1:9898/metrics | grep sys_enter_open_total
 ```
 
-如果要接入 Prometheus，可以增加 scrape 配置：
-
-```yaml
-scrape_configs:
-  - job_name: ebpf-observer
-    static_configs:
-      - targets: ["127.0.0.1:9898"]
-```
-
-然后在 Grafana 中按指标名查询。
-
-## 这套设计的关键点
-
-把 Prometheus 导出链路压缩成一句话：
+能看到类似结果就说明指标已经暴露出来：
 
 ```text
-eBPF 程序更新 map，用户态读取 map，prometheus-client 编码，Axum 暴露 /metrics。
+# HELP sys_enter_open_total Total number of sys_enter_open events per CPU.
+# TYPE sys_enter_open_total gauge
+sys_enter_open_total{cpu="0"} 123
+sys_enter_open_total{cpu="1"} 98
+# EOF
 ```
 
-这个架构有几个好处：
+可以手动制造一些打开文件动作：
 
-- eBPF 侧足够轻，只负责计数和聚合。
-- 用户态负责复杂逻辑，比如标签、清理过期 PID、编码文本。
-- Prometheus 用标准 pull 模型抓取，不需要 eBPF 程序主动推送数据。
-- 后续新增指标时，只要增加 map、collector 和 registry 注册即可。
+```bash
+ls /tmp >/dev/null
+cat /etc/hosts >/dev/null
+find /etc -maxdepth 1 -type f >/dev/null
+```
 
-后续优化可以从三个方向做：
+再查一次：
 
-1. 把网络 connect、established、失败次数和耗时分桶补齐。
-2. 把 `tcp_sendmsg` 的发送字节数从日志沉淀为 `*_bytes_total` 指标。
-3. 统一各模块 Registry，减少手工拼接 OpenMetrics 文本的复杂度。
+```bash
+curl -s http://127.0.0.1:9898/metrics | grep sys_enter_open_total
+```
 
-日志适合回答“刚刚发生了什么”，指标适合回答“这段时间整体怎么样”。当 eBPF 工具从调试脚本走向长期观测系统时，Prometheus 导出就是非常自然的一步。
+如果计数上涨，说明从 syscall tracepoint 到 Prometheus 文本输出这段已经通了。
+
+后面看数据时，可以先查原始值：
+
+```promql
+sys_enter_open_total
+```
+
+再看增长速度：
+
+```promql
+sum(rate(sys_enter_open_total[5m]))
+```
+
+如果某段时间这个值突然上升，就可以继续往下排查：是否有配置频繁 reload、是否有目录扫描、是否有异常临时文件读写。
+
+## 收一下
+
+这次只做了一件事：统计打开文件次数。
+
+实现上没有把每次 `open` 都打印出来，而是在 eBPF 侧用 `PerCpuArray` 维护累计值，用户态定期读取，再通过 `/metrics` 给 Prometheus 抓取。
+
+这种方式的好处是运行时足够安静。平时只是一条时间序列，需要排查时再用 PromQL 看趋势：
+
+```promql
+sum(rate(sys_enter_open_total[5m]))
+```
+
+从这个指标开始，已经可以回答一个很具体的问题：服务运行过程中，打开文件动作有没有异常变多。
