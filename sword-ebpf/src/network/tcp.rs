@@ -49,6 +49,23 @@ pub struct SysEnterType {
 pub static SYS_ENTER_STATISTICS: PerCpuHashMap<SysEnterType, u64> =
     PerCpuHashMap::with_max_entries(4096, 0);
 
+pub unsafe fn sys_enter_statistics_inc(pid: u32, enter_type: u32) -> Result<u32, i64> {
+    let key = SysEnterType {
+        pid: pid,
+        enter_type: enter_type,
+    };
+    match SYS_ENTER_STATISTICS.get_ptr_mut(&key) {
+        Some(count) => {
+            *count = *count + 1;
+        }
+        None => {
+            SYS_ENTER_STATISTICS.insert(&key, 1, 0)?;
+        }
+    }
+
+    return Ok(0);
+}
+
 ///
 /// kfunc:vmlinux:tcp_sendmsg
 /// struct sock * sk
@@ -212,22 +229,7 @@ fn try_sys_enter_connect(ctx: TracePointContext) -> Result<u32, i64> {
     let (pid, _tid) = common::thread_id();
 
     unsafe {
-        match SYS_ENTER_STATISTICS.get_ptr_mut(&SysEnterType {
-            pid: 1,
-            enter_type: 1,
-        }) {
-            Some(count) => {
-                *count = *count + 1;
-            }
-            None => SYS_ENTER_STATISTICS.insert(
-                &SysEnterType {
-                    pid: pid,
-                    enter_type: 1,
-                },
-                1,
-                0,
-            )?,
-        }
+        sys_enter_statistics_inc(pid, 1)?;
         match SYS_ENTER_CONNECT.get_ptr_mut(&pid) {
             Some(count) => {
                 *count = *count + 1;
@@ -306,7 +308,9 @@ pub fn sys_enter_socket(ctx: TracePointContext) -> u32 {
 }
 
 fn try_sys_enter_socket(ctx: TracePointContext) -> Result<u32, i64> {
+    let (pid, _tid) = common::thread_id();
     unsafe {
+        sys_enter_statistics_inc(pid, 1)?;
         let family = ctx.read_at::<u64>(16)?;
         let sock_type = ctx.read_at::<u64>(24)?;
         let protocol = ctx.read_at::<u64>(32)?;
@@ -500,7 +504,11 @@ pub fn sys_enter_accept(ctx: TracePointContext) -> u32 {
     }
 }
 
-fn try_sys_enter_accept(ctx: TracePointContext) -> Result<i32, u64> {
+fn try_sys_enter_accept(ctx: TracePointContext) -> Result<u32, i64> {
+    let (pid, _tid) = common::thread_id();
+    unsafe {
+        sys_enter_statistics_inc(pid, 3)?;
+    }
     Ok(0)
 }
 
@@ -532,7 +540,11 @@ pub fn sys_enter_accept4(ctx: TracePointContext) -> u32 {
     }
 }
 
-fn try_sys_enter_accept4(ctx: TracePointContext) -> Result<i32, u64> {
+fn try_sys_enter_accept4(ctx: TracePointContext) -> Result<u32, i64> {
+    let (pid, _tid) = common::thread_id();
+    unsafe {
+        sys_enter_statistics_inc(pid, 4)?;
+    }
     Ok(0)
 }
 
