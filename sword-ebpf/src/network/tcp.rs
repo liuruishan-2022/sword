@@ -20,7 +20,7 @@ use aya_ebpf::{
     programs::{ProbeContext, TracePointContext},
 };
 use aya_log_ebpf::info;
-use sword_common::TargetPid;
+use sword_common::{SysEnterType, TargetPid};
 
 const AF_INET: u16 = 2;
 const AF_INET6: u16 = 10;
@@ -33,15 +33,6 @@ pub static SYS_ENTER_CONNECT: PerCpuHashMap<u32, u64> = PerCpuHashMap::with_max_
 
 #[map]
 pub static START: HashMap<u64, u64> = HashMap::with_max_entries(4096, 0);
-
-///
-/// 需要定义一个struct用来存储一些类型信息，方便进行多信息的记录
-///
-#[repr(C)]
-pub struct SysEnterType {
-    pid: u32,
-    enter_type: u32,
-}
 
 ///
 /// 这个主要是统计我们的SYS_ENTER的调用统计

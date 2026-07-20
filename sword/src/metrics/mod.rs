@@ -10,7 +10,7 @@ use axum::{
 };
 use aya::maps::{HashMap, MapData, PerCpuArray, PerCpuHashMap};
 use log::{error, info};
-use sword_common::{SchedSwitchStateKey, ThreadComm};
+use sword_common::{SchedSwitchStateKey, SysEnterType, ThreadComm};
 use tokio::net::TcpListener;
 use tokio::sync::Mutex;
 
@@ -26,6 +26,7 @@ const THREAD_OFFCPU_TOTAL_NS_MAP: &str = "THREAD_OFFCPU_TOTAL_NS";
 const THREAD_COMM_MAP: &str = "THREAD_COMM";
 const SYS_ENTER_OPEN_COUNTER_MAP: &str = "SYS_ENTER_OPEN_COUNTER";
 const SYS_ENTER_CONNECT: &str = "SYS_ENTER_CONNECT";
+const SYS_ENTER_STATISTICS: &str = "SYS_ENTER_STATISTICS";
 
 pub async fn spawn_prometheus_exporter(ebpf: &mut aya::Ebpf) -> anyhow::Result<()> {
     let map = ebpf
@@ -60,6 +61,12 @@ pub async fn spawn_prometheus_exporter(ebpf: &mut aya::Ebpf) -> anyhow::Result<(
         .ok_or_else(|| anyhow::anyhow!("map {SYS_ENTER_CONNECT} not found"))?;
     let sys_enter_connect_map: PerCpuHashMap<MapData, u32, u64> = PerCpuHashMap::try_from(map)?;
 
+    let map = ebpf
+        .take_map(SYS_ENTER_STATISTICS)
+        .ok_or_else(|| anyhow::anyhow!("map {SYS_ENTER_STATISTICS} notfound"))?;
+    let sys_enter_statistics_map: PerCpuHashMap<MapData, SysEnterType, u64> =
+        PerCpuHashMap::try_from(map)?;
+
     let cpu_state = CpuCollector::new(
         sched_switch_total_map,
         sys_enter_open_counter_map,
@@ -67,7 +74,7 @@ pub async fn spawn_prometheus_exporter(ebpf: &mut aya::Ebpf) -> anyhow::Result<(
         thread_offcpu_total_ns_map,
         thread_comm_map,
     );
-    let network_state = NetworkCollector::new(sys_enter_connect_map);
+    let network_state = NetworkCollector::new(sys_enter_connect_map, sys_enter_statistics_map);
     let exporter_state = Arc::new(Mutex::new(MetricsState {
         cpu: cpu_state,
         network: network_state,

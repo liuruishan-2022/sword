@@ -32,6 +32,13 @@ pub struct TargetPid {
     pub _pad: u32,
 }
 
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
+pub struct SysEnterType {
+    pub pid: u32,
+    pub enter_type: u32,
+}
+
 #[cfg(feature = "user")]
 unsafe impl aya::Pod for SchedSwitchStateKey {}
 
@@ -43,3 +50,6 @@ unsafe impl aya::Pod for ThreadOffCpuStart {}
 
 #[cfg(feature = "user")]
 unsafe impl aya::Pod for TargetPid {}
+
+#[cfg(feature = "user")]
+unsafe impl aya::Pod for SysEnterType {}
