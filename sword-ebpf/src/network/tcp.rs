@@ -35,6 +35,21 @@ pub static SYS_ENTER_CONNECT: PerCpuHashMap<u32, u64> = PerCpuHashMap::with_max_
 pub static START: HashMap<u64, u64> = HashMap::with_max_entries(4096, 0);
 
 ///
+/// 需要定义一个struct用来存储一些类型信息，方便进行多信息的记录
+///
+#[repr(C)]
+pub struct SysEnterType {
+    pid: u32,
+    enter_type: u32,
+}
+
+///
+/// 这个主要是统计我们的SYS_ENTER的调用统计
+#[map]
+pub static SYS_ENTER_STATISTICS: PerCpuHashMap<SysEnterType, u64> =
+    PerCpuHashMap::with_max_entries(4096, 0);
+
+///
 /// kfunc:vmlinux:tcp_sendmsg
 /// struct sock * sk
 /// struct msghdr * msg
@@ -183,6 +198,8 @@ fn matches_tcp_sendmsg_target() -> Result<bool, u32> {
 ///
 /// print fmt: "fd: 0x%08lx, uservaddr: 0x%08lx, addrlen: 0x%08lx", ((unsigned long)(REC->fd)), ((unsigned long)(REC->uservaddr)), ((unsigned long)(REC->addrlen))
 ///
+/// 定义enter_type: 1
+///
 #[tracepoint]
 pub fn sys_enter_connect(ctx: TracePointContext) -> u32 {
     match try_sys_enter_connect(ctx) {
@@ -195,6 +212,22 @@ fn try_sys_enter_connect(ctx: TracePointContext) -> Result<u32, i64> {
     let (pid, _tid) = common::thread_id();
 
     unsafe {
+        match SYS_ENTER_STATISTICS.get_ptr_mut(&SysEnterType {
+            pid: 1,
+            enter_type: 1,
+        }) {
+            Some(count) => {
+                *count = *count + 1;
+            }
+            None => SYS_ENTER_STATISTICS.insert(
+                &SysEnterType {
+                    pid: pid,
+                    enter_type: 1,
+                },
+                1,
+                0,
+            )?,
+        }
         match SYS_ENTER_CONNECT.get_ptr_mut(&pid) {
             Some(count) => {
                 *count = *count + 1;
