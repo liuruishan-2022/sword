@@ -229,12 +229,6 @@ fn try_sys_enter_connect(ctx: TracePointContext) -> Result<u32, i64> {
                 SYS_ENTER_CONNECT.insert(pid, 1, 0)?;
             }
         }
-        let fd = ctx.read_at::<u64>(16)?;
-        info!(&ctx, "掉用connect函數的鏈接:{}!", fd);
-
-        let useraddr = ctx.read_at::<u64>(24)? as *const sockaddr;
-        let sa = { bpf_probe_read_user(useraddr).map_err(|_| 1i64)? };
-        info!(&ctx, "查看具體的sa_family:{}!", sa.sa_family);
     }
 
     Ok(0)
@@ -265,7 +259,6 @@ pub fn sys_exit_connect(ctx: TracePointContext) -> u32 {
 fn try_sys_exit_connect(ctx: TracePointContext) -> Result<u32, i64> {
     unsafe {
         let ret = ctx.read_at::<i64>(16)?;
-        info!(&ctx, "返回的函数数据是:{}", ret);
     }
     Ok(0)
 }
@@ -302,14 +295,6 @@ fn try_sys_enter_socket(ctx: TracePointContext) -> Result<u32, i64> {
     let (pid, _tid) = common::thread_id();
     unsafe {
         sys_enter_statistics_inc(pid, 1)?;
-        let family = ctx.read_at::<u64>(16)?;
-        let sock_type = ctx.read_at::<u64>(24)?;
-        let protocol = ctx.read_at::<u64>(32)?;
-
-        info!(
-            &ctx,
-            "执行获取到的信息: family:{} sock_type:{} protocol:{}!", family, sock_type, protocol
-        );
     }
     Ok(0)
 }
@@ -340,12 +325,6 @@ pub fn sys_exit_socket(ctx: TracePointContext) -> u32 {
 }
 
 fn try_sys_exit_socket(ctx: TracePointContext) -> Result<u32, i64> {
-    let (pid, tid) = common::thread_id();
-
-    unsafe {
-        let ret = ctx.read_at::<u64>(16)?;
-        info!(&ctx, "对应的进程:{}-{} socket函数返回值:{}!", pid, tid, ret);
-    }
     Ok(0)
 }
 
@@ -403,7 +382,6 @@ fn try_tcp_v4_connect(ctx: ProbeContext) -> Result<u32, u64> {
     if is_ok.is_err() {
         return Err(is_ok.unwrap_err() as u64);
     }
-    info!(&ctx, "抓取到一个sock信息:{}!", sock);
     Ok(0)
 }
 
@@ -454,14 +432,6 @@ fn try_inet_sock_set_state(ctx: TracePointContext) -> Result<u32, i64> {
             if let Some(start_ns) = START.get(&skaddr) {
                 let current_ns = bpf_ktime_get_ns();
                 let cost_ns = current_ns - start_ns;
-                info!(
-                    &ctx,
-                    "Socket:{} 旧状态:{} 新状态:{} 耗时为:{}ms!",
-                    skaddr,
-                    old_state,
-                    new_state,
-                    cost_ns / 1000000
-                );
             }
         }
     }
