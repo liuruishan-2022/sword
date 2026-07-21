@@ -42,7 +42,7 @@ pub static SYS_ENTER_STATISTICS: PerCpuHashMap<SysEnterType, u64> =
 
 pub unsafe fn sys_enter_statistics_inc(pid: u32, enter_type: u32) -> Result<u32, i64> {
     let key = SysEnterType {
-        pid: pid,
+        pid: 1,
         enter_type: enter_type,
     };
     match SYS_ENTER_STATISTICS.get_ptr_mut(&key) {
