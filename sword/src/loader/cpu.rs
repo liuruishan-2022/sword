@@ -1,7 +1,6 @@
 use std::{collections::HashSet, env, fs, time::Duration};
 
 use aya::maps::{HashMap as AyaHashMap, MapData};
-use aya::programs::TracePoint;
 use log::{info, warn};
 use sword_common::SCHED_SWITCH_TARGET_TIDS_MAX_ENTRIES;
 use tokio::time::sleep;

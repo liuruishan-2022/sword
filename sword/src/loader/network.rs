@@ -1,8 +1,7 @@
 ///
 /// 放置网络相关的loader
 ///
-use aya::maps::{Array, MapData};
-use env_logger::try_init_from_env;
+use aya::maps::Array;
 use log::info;
 use sword_common::TargetPid;
 

@@ -1,4 +1,3 @@
-use aya::programs::TracePoint;
 
 use crate::loader::TracePointConfig;
 
