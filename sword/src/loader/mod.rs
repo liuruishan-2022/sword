@@ -126,7 +126,14 @@ impl TracePointConfig {
         let program: &mut TracePoint = ebpf.program_mut(self.uname()).unwrap().try_into()?;
         program.load()?;
         program.attach(self.category(), self.kname())?;
+        info!("load tracepoint:{}!", self.to_string());
         Ok(())
+    }
+}
+
+impl ToString for TracePointConfig {
+    fn to_string(&self) -> String {
+        format!("{}/{}-->{}", self.category(), self.kname(), self.uname())
     }
 }
 
