@@ -598,16 +598,70 @@ fn try_tcp_send_reset(ctx: TracePointContext) -> Result<u32, i64> {
     let pid = (pid_tgid >> 32) as u32;
     let tid = pid_tgid as u32;
 
-    info!(
-        &ctx,
-        "tcp_send_reset的信息为:pid:{} tid:{} state:{} family:{} sport:{} dport:{}",
-        pid,
-        tid,
-        state,
-        family,
-        sport,
-        dport,
-    );
+    if family == AF_INET {
+        let saddr: [u8; 4] = unsafe { ctx.read_at::<[u8; 4]>(42).map_err(|err| err)? };
+        let daddr: [u8; 4] = unsafe { ctx.read_at::<[u8; 4]>(46).map_err(|err| err)? };
+
+        info!(
+            &ctx,
+            "tcp_send_reset的信息为:pid:{} tid:{} state:{} family:{} source:{}.{}.{}.{}:{} dst:{}.{}.{}.{}:{}",
+            pid,
+            tid,
+            state,
+            family,
+            saddr[0],
+            saddr[1],
+            saddr[2],
+            saddr[3],
+            sport,
+            daddr[0],
+            daddr[1],
+            daddr[2],
+            daddr[3],
+            dport,
+        );
+    } else if family == AF_INET6 {
+        let saddr_v6: [u8; 16] = unsafe { ctx.read_at::<[u8; 16]>(50).map_err(|err| err)? };
+        let daddr_v6: [u8; 16] = unsafe { ctx.read_at::<[u8; 16]>(66).map_err(|err| err)? };
+
+        info!(
+            &ctx,
+            "tcp_send_reset的信息为:pid:{} tid:{} state:{} family:{} source:{:x}:{:x}:{:x}:{:x}:{:x}:{:x}:{:x}:{:x}:{} dst:{:x}:{:x}:{:x}:{:x}:{:x}:{:x}:{:x}:{:x}:{}",
+            pid,
+            tid,
+            state,
+            family,
+            u16::from_be_bytes([saddr_v6[0], saddr_v6[1]]),
+            u16::from_be_bytes([saddr_v6[2], saddr_v6[3]]),
+            u16::from_be_bytes([saddr_v6[4], saddr_v6[5]]),
+            u16::from_be_bytes([saddr_v6[6], saddr_v6[7]]),
+            u16::from_be_bytes([saddr_v6[8], saddr_v6[9]]),
+            u16::from_be_bytes([saddr_v6[10], saddr_v6[11]]),
+            u16::from_be_bytes([saddr_v6[12], saddr_v6[13]]),
+            u16::from_be_bytes([saddr_v6[14], saddr_v6[15]]),
+            sport,
+            u16::from_be_bytes([daddr_v6[0], daddr_v6[1]]),
+            u16::from_be_bytes([daddr_v6[2], daddr_v6[3]]),
+            u16::from_be_bytes([daddr_v6[4], daddr_v6[5]]),
+            u16::from_be_bytes([daddr_v6[6], daddr_v6[7]]),
+            u16::from_be_bytes([daddr_v6[8], daddr_v6[9]]),
+            u16::from_be_bytes([daddr_v6[10], daddr_v6[11]]),
+            u16::from_be_bytes([daddr_v6[12], daddr_v6[13]]),
+            u16::from_be_bytes([daddr_v6[14], daddr_v6[15]]),
+            dport,
+        );
+    } else {
+        info!(
+            &ctx,
+            "tcp_send_reset的信息为:pid:{} tid:{} state:{} family:{} sport:{} dport:{}",
+            pid,
+            tid,
+            state,
+            family,
+            sport,
+            dport,
+        );
+    }
 
     Ok(0)
 }
