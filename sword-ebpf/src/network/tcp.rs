@@ -590,10 +590,10 @@ pub fn tcp_send_reset(ctx: TracePointContext) -> u32 {
 }
 
 fn try_tcp_send_reset(ctx: TracePointContext) -> Result<u32, i64> {
-    let state: i32 = unsafe { ctx.read_at::<i32>(24).map_err(|err| err)? };
-    let sport: u16 = unsafe { ctx.read_at::<u16>(28).map_err(|err| err)? };
-    let dport: u16 = unsafe { ctx.read_at::<u16>(30).map_err(|err| err)? };
-    let family: u16 = unsafe { ctx.read_at::<u16>(32).map_err(|err| err)? };
+    let state: i32 = unsafe { ctx.read_at::<i32>(32).map_err(|err| err)? };
+    let sport: u16 = unsafe { ctx.read_at::<u16>(36).map_err(|err| err)? };
+    let dport: u16 = unsafe { ctx.read_at::<u16>(38).map_err(|err| err)? };
+    let family: u16 = unsafe { ctx.read_at::<u16>(40).map_err(|err| err)? };
     let pid_tgid = bpf_get_current_pid_tgid();
     let pid = (pid_tgid >> 32) as u32;
     let tid = pid_tgid as u32;
