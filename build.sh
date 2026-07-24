@@ -31,6 +31,46 @@ commitId=$(git log -n 1 --pretty=format:"%H")
 short_commit_id=${commitId:0:10}
 echo "${GREEN}Git 短 Commit ID：${short_commit_id}${NC}"
 
+update_deployment_image() {
+    local image_repo="$1"
+    local version="$2"
+    local deployment_file="deployment.yaml"
+    local image="${image_repo}:${version}"
+
+    if [ ! -f "${deployment_file}" ]; then
+        echo "${YELLOW}警告：${deployment_file} 不存在，跳过镜像 tag 替换${NC}"
+        return
+    fi
+
+    IMAGE_REPO="${image_repo}" IMAGE="${image}" DEPLOYMENT_FILE="${deployment_file}" python3 - <<'PY'
+import os
+from pathlib import Path
+
+image_repo = os.environ["IMAGE_REPO"]
+image = os.environ["IMAGE"]
+deployment_file = Path(os.environ["DEPLOYMENT_FILE"])
+lines = deployment_file.read_text(encoding="utf-8").splitlines(keepends=True)
+updated = False
+new_lines = []
+
+for line in lines:
+    stripped = line.lstrip()
+    indent = line[: len(line) - len(stripped)]
+    if stripped.startswith("image:") and stripped.split(":", 1)[1].strip().startswith(f"{image_repo}:"):
+        newline = "\n" if line.endswith("\n") else ""
+        new_lines.append(f"{indent}image: {image}{newline}")
+        updated = True
+    else:
+        new_lines.append(line)
+
+if not updated:
+    raise SystemExit(f"未找到镜像配置: {image_repo}")
+
+deployment_file.write_text("".join(new_lines), encoding="utf-8")
+PY
+    echo "${GREEN}已更新 ${deployment_file} 镜像：${image}${NC}"
+}
+
 # 构建 sword 模块
 build_sword() {
     local version_prefix="v0.1.0"
@@ -50,6 +90,9 @@ build_sword() {
 
     echo "3. 推送 Docker 镜像..."
     docker push ${image_repo}:${version}
+
+    echo "4. 更新 deployment.yaml 镜像 tag..."
+    update_deployment_image "${image_repo}" "${version}"
 
     echo "${GREEN}${module_name} 模块构建并推送完成！${NC}"
 }
@@ -74,6 +117,9 @@ build_rust_mouse() {
 
         echo "3. 推送 Docker 镜像..."
         docker push ${image_repo}:${version}
+
+        echo "4. 更新 deployment.yaml 镜像 tag..."
+        update_deployment_image "${image_repo}" "${version}"
     else
         echo "${YELLOW}警告：${dockerfile_path} 不存在，跳过 Docker 构建${NC}"
     fi
