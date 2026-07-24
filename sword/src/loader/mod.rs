@@ -106,6 +106,10 @@ impl TracePointConfig {
         Self::new(uname.to_string(), "sched".to_string(), kname.to_string())
     }
 
+    pub fn create_tcp(uname: &str, kname: &str) -> Self {
+        Self::new(uname.to_string(), "tcp".to_string(), kname.to_string())
+    }
+
     pub fn uname(&self) -> &str {
         self.uname.as_str()
     }

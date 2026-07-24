@@ -49,6 +49,7 @@ pub fn load_tracepoint(ebpf: &mut aya::Ebpf) -> anyhow::Result<()> {
         TracePointConfig::create_syscalls("sys_enter_socket", "sys_enter_socket"),
         TracePointConfig::create_syscalls("sys_exit_socket", "sys_exit_socket"),
         TracePointConfig::create_sock("inet_sock_set_state", "inet_sock_set_state"),
+        TracePointConfig::create_tcp("tcp_send_reset", "tcp_send_rest"),
     ];
 
     for ele in tracepoints {
