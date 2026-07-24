@@ -558,3 +558,37 @@ pub fn sys_exit_accept4(ctx: TracePointContext) -> u32 {
 fn try_sys_exit_accept(ctx: TracePointContext) -> Result<u32, i64> {
     Ok(0)
 }
+
+///
+/// 跟踪tcp的reset系列
+/// /sys/kernel/debug/tracing/events/tcp/tcp_send_reset/format
+/// name: tcp_send_reset
+/// ID: 1596
+/// format:
+/// 	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+/// 	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+/// 	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+/// 	field:int common_pid;	offset:4;	size:4;	signed:1;
+///
+/// 	field:const void * skbaddr;	offset:8;	size:8;	signed:0;
+/// 	field:const void * skaddr;	offset:16;	size:8;	signed:0;
+/// 	field:int state;	offset:24;	size:4;	signed:1;
+/// 	field:__u16 sport;	offset:28;	size:2;	signed:0;
+/// 	field:__u16 dport;	offset:30;	size:2;	signed:0;
+/// 	field:__u16 family;	offset:32;	size:2;	signed:0;
+/// 	field:__u8 saddr[4];	offset:34;	size:4;	signed:0;
+/// 	field:__u8 daddr[4];	offset:38;	size:4;	signed:0;
+/// 	field:__u8 saddr_v6[16];	offset:42;	size:16;	signed:0;
+/// 	field:__u8 daddr_v6[16];	offset:58;	size:16;	signed:0;
+///
+#[tracepoint]
+pub fn tcp_send_reset(ctx: TracePointContext) -> u32 {
+    match try_tcp_send_reset(ctx) {
+        Ok(ret) => ret,
+        Err(err) => err as u32,
+    }
+}
+
+fn try_tcp_send_reset(ctx: TracePointContext) -> Result<u32, i64> {
+    Ok(0)
+}
