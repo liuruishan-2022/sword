@@ -591,24 +591,73 @@ pub fn tcp_send_reset(ctx: TracePointContext) -> u32 {
 
 fn try_tcp_send_reset(ctx: TracePointContext) -> Result<u32, i64> {
     let skaddr: u64 = unsafe { ctx.read_at::<u64>(16).map_err(|err| err)? };
+    let state: i32 = unsafe { ctx.read_at::<i32>(24).map_err(|err| err)? };
+    let sport: u16 = unsafe { ctx.read_at::<u16>(28).map_err(|err| err)? };
+    let dport: u16 = unsafe { ctx.read_at::<u16>(30).map_err(|err| err)? };
+    let family: u16 = unsafe { ctx.read_at::<u16>(32).map_err(|err| err)? };
+    let pid_tgid = bpf_get_current_pid_tgid();
+    let pid = (pid_tgid >> 32) as u32;
+    let tid = pid_tgid as u32;
 
-    let sk = skaddr as *const sock;
-    let tuple = read_tcp_socket_tuple(sk).map_err(|err| err as i64)?;
-    info!(
-        &ctx,
-        "tcp_send_reset的信息为:pid:{} tid:{} src:{}.{}.{}.{}:{} dst:{}.{}.{}.{}:{}",
-        tuple.pid,
-        tuple.tid,
-        ipv4_octet(tuple.saddr_v4, 0),
-        ipv4_octet(tuple.saddr_v4, 1),
-        ipv4_octet(tuple.saddr_v4, 2),
-        ipv4_octet(tuple.saddr_v4, 3),
-        tuple.sport,
-        ipv4_octet(tuple.daddr_v4, 0),
-        ipv4_octet(tuple.daddr_v4, 1),
-        ipv4_octet(tuple.daddr_v4, 2),
-        ipv4_octet(tuple.daddr_v4, 3),
-        tuple.dport,
-    );
+    if family == AF_INET {
+        let saddr: [u8; 4] = unsafe { ctx.read_at::<[u8; 4]>(34).map_err(|err| err)? };
+        let daddr: [u8; 4] = unsafe { ctx.read_at::<[u8; 4]>(38).map_err(|err| err)? };
+
+        info!(
+            &ctx,
+            "tcp_send_reset的信息为:pid:{} tid:{} skaddr:{} state:{} family:{} src:{}.{}.{}.{}:{} dst:{}.{}.{}.{}:{}",
+            pid,
+            tid,
+            skaddr,
+            state,
+            family,
+            saddr[0],
+            saddr[1],
+            saddr[2],
+            saddr[3],
+            sport,
+            daddr[0],
+            daddr[1],
+            daddr[2],
+            daddr[3],
+            dport,
+        );
+    } else if family == AF_INET6 {
+        let saddr_v6: [u8; 16] = unsafe { ctx.read_at::<[u8; 16]>(42).map_err(|err| err)? };
+        let daddr_v6: [u8; 16] = unsafe { ctx.read_at::<[u8; 16]>(58).map_err(|err| err)? };
+
+        info!(
+            &ctx,
+            "tcp_send_reset的信息为:pid:{} tid:{} skaddr:{} state:{} family:{} src_v6:{:x}:{:x}:{:x}:{:x}:{} dst_v6:{:x}:{:x}:{:x}:{:x}:{}",
+            pid,
+            tid,
+            skaddr,
+            state,
+            family,
+            u16::from_be_bytes([saddr_v6[0], saddr_v6[1]]),
+            u16::from_be_bytes([saddr_v6[2], saddr_v6[3]]),
+            u16::from_be_bytes([saddr_v6[4], saddr_v6[5]]),
+            u16::from_be_bytes([saddr_v6[6], saddr_v6[7]]),
+            sport,
+            u16::from_be_bytes([daddr_v6[0], daddr_v6[1]]),
+            u16::from_be_bytes([daddr_v6[2], daddr_v6[3]]),
+            u16::from_be_bytes([daddr_v6[4], daddr_v6[5]]),
+            u16::from_be_bytes([daddr_v6[6], daddr_v6[7]]),
+            dport,
+        );
+    } else {
+        info!(
+            &ctx,
+            "tcp_send_reset的信息为:pid:{} tid:{} skaddr:{} state:{} family:{} sport:{} dport:{}",
+            pid,
+            tid,
+            skaddr,
+            state,
+            family,
+            sport,
+            dport,
+        );
+    }
+
     Ok(0)
 }
