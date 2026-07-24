@@ -590,5 +590,25 @@ pub fn tcp_send_reset(ctx: TracePointContext) -> u32 {
 }
 
 fn try_tcp_send_reset(ctx: TracePointContext) -> Result<u32, i64> {
+    let skaddr: u64 = unsafe { ctx.read_at::<u64>(16).map_err(|err| err)? };
+
+    let sk = skaddr as *const sock;
+    let tuple = read_tcp_socket_tuple(sk).map_err(|err| err as i64)?;
+    info!(
+        &ctx,
+        "tcp_send_reset的信息为:pid:{} tid:{} src:{}.{}.{}.{}:{} dst:{}.{}.{}.{}:{}",
+        tuple.pid,
+        tuple.tid,
+        ipv4_octet(tuple.saddr_v4, 0),
+        ipv4_octet(tuple.saddr_v4, 1),
+        ipv4_octet(tuple.saddr_v4, 2),
+        ipv4_octet(tuple.saddr_v4, 3),
+        tuple.sport,
+        ipv4_octet(tuple.daddr_v4, 0),
+        ipv4_octet(tuple.daddr_v4, 1),
+        ipv4_octet(tuple.daddr_v4, 2),
+        ipv4_octet(tuple.daddr_v4, 3),
+        tuple.dport,
+    );
     Ok(0)
 }
