@@ -10,14 +10,16 @@ use crate::loader::{KProberConfig, LoaderOptions, TracePointConfig};
 const TARGET_PID: &str = "TARGET_PID";
 
 pub fn load_network_kprobe(ebpf: &mut aya::Ebpf, options: &LoaderOptions) -> anyhow::Result<()> {
-    let kprobe_configs = vec![
+    let mut kprobe_configs = vec![
         KProberConfig::new("tcp_sendmsg", "tcp_sendmsg"),
         KProberConfig::new("tcp_recvmsg", "tcp_recvmsg"),
         KProberConfig::new("tcp_recvmsg_ret", "tcp_recvmsg"),
-        KProberConfig::new("tcp_v4_connect", "tcp_v4_connect"),
     ];
-    if let Some(pid) = options.target_pid {
-        configure_tcp_sendmsg_target(ebpf, pid)?;
+    if options.targeting_enabled() {
+        if let Some(pid) = options.target_pid {
+            kprobe_configs.push(KProberConfig::new("tcp_v4_connect", "tcp_v4_connect"));
+            configure_tcp_sendmsg_target(ebpf, pid)?;
+        }
         for ele in kprobe_configs {
             ele.load_kprobe(ebpf)?;
         }

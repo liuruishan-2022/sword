@@ -4,6 +4,7 @@ pub const SCHED_SWITCH_TARGET_TIDS_MAX_ENTRIES: u32 = 4096;
 pub const SCHED_SWITCH_THREAD_STATE_MAX_ENTRIES: u32 = 32768;
 pub const TASK_COMM_LEN: usize = 16;
 pub const RISK_TARGET_CONFIG_MAX_ENTRIES: u32 = 1;
+pub const RISK_TARGET_TGIDS_MAX_ENTRIES: u32 = 128;
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]

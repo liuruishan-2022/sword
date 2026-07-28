@@ -1,20 +1,22 @@
-use std::{collections::HashSet, env, fs, time::Duration};
+use std::{collections::HashSet, fs, time::Duration};
 
 use aya::maps::{HashMap as AyaHashMap, MapData};
 use log::{info, warn};
-use sword_common::SCHED_SWITCH_TARGET_TIDS_MAX_ENTRIES;
+use sword_common::{RISK_TARGET_TGIDS_MAX_ENTRIES, SCHED_SWITCH_TARGET_TIDS_MAX_ENTRIES};
 use tokio::time::sleep;
 
 use crate::loader::{LoaderOptions, TracePointConfig};
 
 const SCHED_SWITCH_TARGET_TIDS_MAP: &str = "SCHED_SWITCH_TARGET_TIDS";
+const RISK_TARGET_TGIDS_MAP: &str = "RISK_TARGET_TGIDS";
 const SCHED_SWITCH_TARGET_TGID_ENV: &str = "SWORD_SCHED_SWITCH_PID";
-const SCHED_SWITCH_TARGET_COMM_ENV: &str = "SWORD_SCHED_SWITCH_COMM";
 const SCHED_SWITCH_TARGET_TID_PRESENT: u8 = 1;
+const RISK_TARGET_TGID_PRESENT: u8 = 1;
 
 #[derive(Clone, Debug)]
 enum SchedSwitchTarget {
     Pid(u32),
+    Cmdline(String),
     Comm(String),
 }
 
@@ -22,75 +24,68 @@ impl SchedSwitchTarget {
     fn description(&self) -> String {
         match self {
             Self::Pid(pid) => format!("pid {pid}"),
+            Self::Cmdline(cmdline) => format!("cmdline contains {cmdline}"),
             Self::Comm(comm) => format!("comm {comm}"),
         }
     }
 }
 
+fn cmdline_matches(cmdline: &[u8], marker: &str) -> bool {
+    cmdline
+        .split(|byte| *byte == 0)
+        .filter_map(|arg| std::str::from_utf8(arg).ok())
+        .any(|arg| arg.contains(marker))
+}
+
+#[derive(Default)]
+struct TargetSnapshot {
+    tgids: HashSet<u32>,
+    tids: HashSet<u32>,
+}
+
 fn configure_sched_switch_target_tids(
     ebpf: &mut aya::Ebpf,
     options: &LoaderOptions,
-) -> anyhow::Result<Option<(String, usize)>> {
-    let Some(target) = read_sched_switch_target(options)? else {
+) -> anyhow::Result<Option<(String, usize, usize)>> {
+    let Some(target) = read_sched_switch_target(options) else {
         return Ok(None);
     };
 
-    let tids = collect_target_thread_ids(&target)?;
-    validate_target_tids_capacity(&target, tids.len())?;
+    let snapshot = collect_target_snapshot(&target)?;
+    validate_target_capacity(&target, &snapshot)?;
 
     let mut tids_map: AyaHashMap<MapData, u32, u8> = AyaHashMap::try_from(
         ebpf.take_map(SCHED_SWITCH_TARGET_TIDS_MAP)
             .ok_or_else(|| anyhow::anyhow!("map {SCHED_SWITCH_TARGET_TIDS_MAP} not found"))?,
     )?;
-    for tid in &tids {
+    let mut tgids_map: AyaHashMap<MapData, u32, u8> = AyaHashMap::try_from(
+        ebpf.take_map(RISK_TARGET_TGIDS_MAP)
+            .ok_or_else(|| anyhow::anyhow!("map {RISK_TARGET_TGIDS_MAP} not found"))?,
+    )?;
+    for tid in &snapshot.tids {
         tids_map.insert(*tid, SCHED_SWITCH_TARGET_TID_PRESENT, 0)?;
     }
-    spawn_sched_switch_target_tids_refresher(target.clone(), tids_map, tids.clone());
+    for tgid in &snapshot.tgids {
+        tgids_map.insert(*tgid, RISK_TARGET_TGID_PRESENT, 0)?;
+    }
+    let tgid_count = snapshot.tgids.len();
+    let tid_count = snapshot.tids.len();
+    spawn_target_refresher(target.clone(), tgids_map, tids_map, snapshot);
 
-    Ok(Some((target.description(), tids.len())))
+    Ok(Some((target.description(), tgid_count, tid_count)))
 }
 
-fn read_sched_switch_target(options: &LoaderOptions) -> anyhow::Result<Option<SchedSwitchTarget>> {
+fn read_sched_switch_target(options: &LoaderOptions) -> Option<SchedSwitchTarget> {
     if let Some(target_pid) = options.target_pid {
-        return Ok(Some(SchedSwitchTarget::Pid(target_pid)));
+        return Some(SchedSwitchTarget::Pid(target_pid));
     }
-
-    let target_tgid = match env::var(SCHED_SWITCH_TARGET_TGID_ENV) {
-        Ok(pid) => parse_sched_switch_target_tgid(&pid)?,
-        Err(env::VarError::NotPresent) => None,
-        Err(err) => {
-            return Err(anyhow::anyhow!(
-                "failed to read {SCHED_SWITCH_TARGET_TGID_ENV}: {err}"
-            ));
-        }
-    };
-    let target_comm = read_optional_env(SCHED_SWITCH_TARGET_COMM_ENV)?;
-
-    if let Some(target_tgid) = target_tgid {
-        if target_comm.is_some() {
-            warn!(
-                "both {SCHED_SWITCH_TARGET_TGID_ENV} and {SCHED_SWITCH_TARGET_COMM_ENV} are set; using pid filter"
-            );
-        }
-        return Ok(Some(SchedSwitchTarget::Pid(target_tgid)));
+    if let Some(target_cmdline) = &options.target_cmdline {
+        return Some(SchedSwitchTarget::Cmdline(target_cmdline.clone()));
     }
-
-    Ok(target_comm.map(SchedSwitchTarget::Comm))
-}
-
-fn read_optional_env(name: &str) -> anyhow::Result<Option<String>> {
-    match env::var(name) {
-        Ok(value) => {
-            let value = value.trim();
-            if value.is_empty() {
-                Ok(None)
-            } else {
-                Ok(Some(value.to_string()))
-            }
-        }
-        Err(env::VarError::NotPresent) => Ok(None),
-        Err(err) => Err(anyhow::anyhow!("failed to read {name}: {err}")),
-    }
+    options
+        .target_comm
+        .as_ref()
+        .map(|comm| SchedSwitchTarget::Comm(comm.clone()))
 }
 
 fn parse_sched_switch_target_tgid(value: &str) -> anyhow::Result<Option<u32>> {
@@ -129,9 +124,17 @@ fn collect_thread_ids(target_tgid: u32) -> anyhow::Result<Vec<u32>> {
     Ok(tids)
 }
 
-fn collect_thread_ids_by_comm(target_comm: &str) -> anyhow::Result<Vec<u32>> {
-    let mut tids = Vec::new();
+fn collect_target_process_ids(target: &SchedSwitchTarget) -> anyhow::Result<Vec<u32>> {
+    if let SchedSwitchTarget::Pid(pid) = target {
+        return Ok(std::path::Path::new("/proc")
+            .join(pid.to_string())
+            .exists()
+            .then_some(*pid)
+            .into_iter()
+            .collect());
+    }
 
+    let mut tgids = Vec::new();
     for entry in fs::read_dir("/proc")? {
         let entry = entry?;
         let file_name = entry.file_name();
@@ -140,118 +143,157 @@ fn collect_thread_ids_by_comm(target_comm: &str) -> anyhow::Result<Vec<u32>> {
             continue;
         };
 
-        let comm_path = format!("/proc/{tgid}/comm");
-        let Ok(comm) = fs::read_to_string(&comm_path) else {
-            continue;
+        let matches = match target {
+            SchedSwitchTarget::Cmdline(marker) => fs::read(format!("/proc/{tgid}/cmdline"))
+                .is_ok_and(|cmdline| cmdline_matches(&cmdline, marker)),
+            SchedSwitchTarget::Comm(target_comm) => {
+                fs::read_to_string(format!("/proc/{tgid}/comm"))
+                    .is_ok_and(|comm| comm.trim_end() == target_comm)
+            }
+            SchedSwitchTarget::Pid(_) => false,
         };
-        if comm.trim_end() != target_comm {
-            continue;
+        if matches {
+            tgids.push(tgid);
         }
+    }
+    tgids.sort_unstable();
+    tgids.dedup();
+    Ok(tgids)
+}
 
+fn collect_target_snapshot(target: &SchedSwitchTarget) -> anyhow::Result<TargetSnapshot> {
+    let mut snapshot = TargetSnapshot::default();
+    for tgid in collect_target_process_ids(target)? {
+        snapshot.tgids.insert(tgid);
         match collect_thread_ids(tgid) {
-            Ok(mut process_tids) => tids.append(&mut process_tids),
+            Ok(process_tids) => snapshot.tids.extend(process_tids),
             Err(err) => warn!("failed to collect tids for matching process {tgid}: {err}"),
         }
     }
-
-    tids.sort_unstable();
-    tids.dedup();
-    Ok(tids)
+    Ok(snapshot)
 }
 
-fn collect_target_thread_ids(target: &SchedSwitchTarget) -> anyhow::Result<Vec<u32>> {
-    match target {
-        SchedSwitchTarget::Pid(pid) => collect_thread_ids(*pid),
-        SchedSwitchTarget::Comm(comm) => collect_thread_ids_by_comm(comm),
-    }
-}
-
-fn validate_target_tids_capacity(
+fn validate_target_capacity(
     target: &SchedSwitchTarget,
-    tid_count: usize,
+    snapshot: &TargetSnapshot,
 ) -> anyhow::Result<()> {
-    if tid_count as u32 > SCHED_SWITCH_TARGET_TIDS_MAX_ENTRIES {
+    if snapshot.tgids.len() as u32 > RISK_TARGET_TGIDS_MAX_ENTRIES {
+        return Err(anyhow::anyhow!(
+            "{} has {} processes, exceeds map capacity {}",
+            target.description(),
+            snapshot.tgids.len(),
+            RISK_TARGET_TGIDS_MAX_ENTRIES
+        ));
+    }
+    if snapshot.tids.len() as u32 > SCHED_SWITCH_TARGET_TIDS_MAX_ENTRIES {
         return Err(anyhow::anyhow!(
             "{} has {} tids, exceeds map capacity {}",
             target.description(),
-            tid_count,
+            snapshot.tids.len(),
             SCHED_SWITCH_TARGET_TIDS_MAX_ENTRIES
         ));
     }
     Ok(())
 }
 
-fn spawn_sched_switch_target_tids_refresher(
+fn spawn_target_refresher(
     target: SchedSwitchTarget,
+    mut tgids_map: AyaHashMap<MapData, u32, u8>,
     mut tids_map: AyaHashMap<MapData, u32, u8>,
-    initial_tids: Vec<u32>,
+    initial: TargetSnapshot,
 ) {
     tokio::spawn(async move {
-        let mut known_tids = initial_tids.into_iter().collect::<HashSet<_>>();
+        let mut known_tgids = initial.tgids;
+        let mut known_tids = initial.tids;
 
         loop {
             sleep(Duration::from_secs(5)).await;
 
-            let current_tids = match collect_target_thread_ids(&target) {
-                Ok(tids) => tids.into_iter().collect::<HashSet<_>>(),
+            let current = match collect_target_snapshot(&target) {
+                Ok(snapshot) => snapshot,
                 Err(err) => {
                     warn!(
-                        "failed to refresh tids for {}: {}; removing {} known tids from filter",
+                        "failed to refresh targets for {}: {}",
                         target.description(),
-                        err,
-                        known_tids.len()
+                        err
                     );
-                    remove_known_tids(&mut tids_map, &mut known_tids);
                     continue;
                 }
             };
 
-            if let Err(err) = validate_target_tids_capacity(&target, current_tids.len()) {
+            if let Err(err) = validate_target_capacity(&target, &current) {
                 warn!(
-                    "{err}; keeping previous sched_switch tid filter for {}",
+                    "{err}; keeping previous target filters for {}",
                     target.description()
                 );
                 continue;
             }
 
-            for tid in current_tids.difference(&known_tids) {
-                if let Err(err) = tids_map.insert(*tid, SCHED_SWITCH_TARGET_TID_PRESENT, 0) {
-                    warn!("failed to add tid {} to sched_switch filter: {}", tid, err);
-                }
+            if current.tgids != known_tgids || current.tids != known_tids {
+                info!(
+                    "refreshed target {}; found {} tgids and {} tids",
+                    target.description(),
+                    current.tgids.len(),
+                    current.tids.len()
+                );
             }
-
-            for tid in known_tids.difference(&current_tids) {
-                if let Err(err) = tids_map.remove(tid) {
-                    warn!(
-                        "failed to remove tid {} from sched_switch filter: {}",
-                        tid, err
-                    );
-                }
-            }
-
-            known_tids = current_tids;
+            sync_target_map(
+                &mut tgids_map,
+                &mut known_tgids,
+                &current.tgids,
+                RISK_TARGET_TGID_PRESENT,
+                "tgid",
+            );
+            sync_target_map(
+                &mut tids_map,
+                &mut known_tids,
+                &current.tids,
+                SCHED_SWITCH_TARGET_TID_PRESENT,
+                "tid",
+            );
         }
     });
 }
 
-fn remove_known_tids(tids_map: &mut AyaHashMap<MapData, u32, u8>, known_tids: &mut HashSet<u32>) {
-    for tid in known_tids.drain() {
-        if let Err(err) = tids_map.remove(&tid) {
-            warn!(
-                "failed to remove tid {} from sched_switch filter: {}",
-                tid, err
-            );
+fn sync_target_map(
+    map: &mut AyaHashMap<MapData, u32, u8>,
+    known: &mut HashSet<u32>,
+    current: &HashSet<u32>,
+    present: u8,
+    kind: &str,
+) {
+    for id in current.difference(known).copied().collect::<Vec<_>>() {
+        match map.insert(id, present, 0) {
+            Ok(()) => {
+                known.insert(id);
+            }
+            Err(err) => warn!("failed to add {kind} {id} to target filter: {err}"),
+        }
+    }
+    for id in known.difference(current).copied().collect::<Vec<_>>() {
+        match map.remove(&id) {
+            Ok(()) => {
+                known.remove(&id);
+            }
+            Err(err) => warn!("failed to remove {kind} {id} from target filter: {err}"),
         }
     }
 }
 
 pub fn load_sched_switch(ebpf: &mut aya::Ebpf, options: &LoaderOptions) -> anyhow::Result<()> {
     let target = configure_sched_switch_target_tids(ebpf, options)?;
-    if let Some((target, tid_count)) = target {
-        info!(
-            "attached sched:sched_switch with target {}; loaded {} tids",
-            target, tid_count
-        );
+    if let Some((target, tgid_count, tid_count)) = target {
+        if tgid_count == 0 {
+            warn!(
+                "attached sched:sched_switch with target {}; no matching process yet",
+                target
+            );
+        } else {
+            info!(
+                "attached sched:sched_switch with target {}; loaded {} tgids and {} tids",
+                target, tgid_count, tid_count
+            );
+        }
     } else {
         info!("attached sched:sched_switch without pid/tid filter");
     }
@@ -300,17 +342,13 @@ mod tests {
     fn matches_target_jar_in_nul_separated_cmdline() {
         let cmdline = b"java\0-jar\0content-risk-control-service.jar\0";
 
-        assert!(cmdline_matches(
-            cmdline,
-            "content-risk-control-service.jar"
-        ));
+        assert!(cmdline_matches(cmdline, "content-risk-control-service.jar"));
         assert!(!cmdline_matches(cmdline, "another-service.jar"));
     }
 
     #[test]
     fn cmdline_target_description_does_not_include_full_command() {
-        let target =
-            SchedSwitchTarget::Cmdline("content-risk-control-service.jar".to_string());
+        let target = SchedSwitchTarget::Cmdline("content-risk-control-service.jar".to_string());
 
         assert_eq!(
             target.description(),

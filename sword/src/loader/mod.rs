@@ -13,13 +13,15 @@ pub mod network;
 #[derive(Debug)]
 pub struct LoaderOptions {
     pub target_pid: Option<u32>,
+    pub target_cmdline: Option<String>,
+    pub target_comm: Option<String>,
     pub server_port: u16,
     pub slow_threshold_ms: u64,
 }
 
 impl LoaderOptions {
     pub fn parse_args() -> anyhow::Result<Self> {
-        Self::parse(std::env::args().skip(1))
+        Self::parse_with_env(std::env::args().skip(1), |name| std::env::var(name))
     }
 
     fn parse<I, S>(args: I) -> anyhow::Result<Self>
@@ -27,13 +29,32 @@ impl LoaderOptions {
         I: IntoIterator<Item = S>,
         S: Into<String>,
     {
+        Self::parse_with_env(args, |_| Err(std::env::VarError::NotPresent))
+    }
+
+    fn parse_with_env<I, S, F>(args: I, read_env: F) -> anyhow::Result<Self>
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+        F: Fn(&str) -> Result<String, std::env::VarError>,
+    {
         const DEFAULT_SERVER_PORT: u16 = 8080;
         const DEFAULT_SLOW_THRESHOLD_MS: u64 = 100;
 
         let mut args = args.into_iter().map(Into::into);
-        let mut target_pid = None;
-        let mut server_port = DEFAULT_SERVER_PORT;
-        let mut slow_threshold_ms = DEFAULT_SLOW_THRESHOLD_MS;
+        let mut target_pid = optional_env(&read_env, "SWORD_SCHED_SWITCH_PID")?
+            .map(|value| parse_positive_u32("SWORD_SCHED_SWITCH_PID", &value))
+            .transpose()?;
+        let target_cmdline = optional_env(&read_env, "SWORD_TARGET_CMDLINE")?;
+        let target_comm = optional_env(&read_env, "SWORD_SCHED_SWITCH_COMM")?;
+        let mut server_port = optional_env(&read_env, "SWORD_TARGET_PORT")?
+            .map(|value| parse_positive_u16("SWORD_TARGET_PORT", &value))
+            .transpose()?
+            .unwrap_or(DEFAULT_SERVER_PORT);
+        let mut slow_threshold_ms = optional_env(&read_env, "SWORD_SLOW_THRESHOLD_MS")?
+            .map(|value| parse_positive_u64("SWORD_SLOW_THRESHOLD_MS", &value))
+            .transpose()?
+            .unwrap_or(DEFAULT_SLOW_THRESHOLD_MS);
 
         while let Some(arg) = args.next() {
             match arg.as_str() {
@@ -87,10 +108,64 @@ impl LoaderOptions {
 
         Ok(Self {
             target_pid,
+            target_cmdline,
+            target_comm,
             server_port,
             slow_threshold_ms,
         })
     }
+
+    pub fn targeting_enabled(&self) -> bool {
+        self.target_pid.is_some() || self.target_cmdline.is_some() || self.target_comm.is_some()
+    }
+}
+
+fn optional_env<F>(read_env: &F, name: &str) -> anyhow::Result<Option<String>>
+where
+    F: Fn(&str) -> Result<String, std::env::VarError>,
+{
+    match read_env(name) {
+        Ok(value) => {
+            let value = value.trim();
+            if value.is_empty() {
+                Ok(None)
+            } else {
+                Ok(Some(value.to_string()))
+            }
+        }
+        Err(std::env::VarError::NotPresent) => Ok(None),
+        Err(err) => Err(anyhow::anyhow!("failed to read {name}: {err}")),
+    }
+}
+
+fn parse_positive_u16(name: &str, value: &str) -> anyhow::Result<u16> {
+    let value = value
+        .parse::<u16>()
+        .map_err(|err| anyhow::anyhow!("invalid {name} {value}: {err}"))?;
+    if value == 0 {
+        return Err(anyhow::anyhow!("{name} must be greater than 0"));
+    }
+    Ok(value)
+}
+
+fn parse_positive_u32(name: &str, value: &str) -> anyhow::Result<u32> {
+    let value = value
+        .parse::<u32>()
+        .map_err(|err| anyhow::anyhow!("invalid {name} {value}: {err}"))?;
+    if value == 0 {
+        return Err(anyhow::anyhow!("{name} must be greater than 0"));
+    }
+    Ok(value)
+}
+
+fn parse_positive_u64(name: &str, value: &str) -> anyhow::Result<u64> {
+    let value = value
+        .parse::<u64>()
+        .map_err(|err| anyhow::anyhow!("invalid {name} {value}: {err}"))?;
+    if value == 0 {
+        return Err(anyhow::anyhow!("{name} must be greater than 0"));
+    }
+    Ok(value)
 }
 
 ///
@@ -124,9 +199,9 @@ pub fn load_ebpf(ebpf: &mut aya::Ebpf, options: &LoaderOptions) -> anyhow::Resul
 }
 
 fn configure_risk_target(ebpf: &mut aya::Ebpf, options: &LoaderOptions) -> anyhow::Result<()> {
-    let Some(tgid) = options.target_pid else {
+    if !options.targeting_enabled() {
         return Ok(());
-    };
+    }
 
     let map = ebpf
         .map_mut("RISK_TARGET_CONFIG")
@@ -135,7 +210,7 @@ fn configure_risk_target(ebpf: &mut aya::Ebpf, options: &LoaderOptions) -> anyho
     config_map.set(
         0,
         RiskTargetConfig {
-            tgid,
+            tgid: options.target_pid.unwrap_or(0),
             server_port: options.server_port,
             _pad: 0,
             slow_threshold_ns: options.slow_threshold_ms * 1_000_000,
@@ -143,8 +218,8 @@ fn configure_risk_target(ebpf: &mut aya::Ebpf, options: &LoaderOptions) -> anyho
         0,
     )?;
     info!(
-        "configured risk tracing target pid={} server_port={} slow_threshold_ms={}",
-        tgid, options.server_port, options.slow_threshold_ms
+        "configured risk tracing server_port={} slow_threshold_ms={}",
+        options.server_port, options.slow_threshold_ms
     );
     Ok(())
 }
@@ -226,9 +301,7 @@ mod tests {
 
     use super::LoaderOptions;
 
-    fn env_reader(
-        values: &[(&str, &str)],
-    ) -> impl Fn(&str) -> Result<String, VarError> + use<> {
+    fn env_reader(values: &[(&str, &str)]) -> impl Fn(&str) -> Result<String, VarError> + use<> {
         let values = values
             .iter()
             .map(|(name, value)| ((*name).to_string(), (*value).to_string()))
@@ -272,12 +345,9 @@ mod tests {
     #[test]
     fn parses_daemonset_target_from_environment() {
         let options = LoaderOptions::parse_with_env(
-            [],
+            std::iter::empty::<&str>(),
             env_reader(&[
-                (
-                    "SWORD_TARGET_CMDLINE",
-                    "content-risk-control-service.jar",
-                ),
+                ("SWORD_TARGET_CMDLINE", "content-risk-control-service.jar"),
                 ("SWORD_TARGET_PORT", "8080"),
                 ("SWORD_SLOW_THRESHOLD_MS", "100"),
             ]),
@@ -304,10 +374,7 @@ mod tests {
                 "250",
             ],
             env_reader(&[
-                (
-                    "SWORD_TARGET_CMDLINE",
-                    "content-risk-control-service.jar",
-                ),
+                ("SWORD_TARGET_CMDLINE", "content-risk-control-service.jar"),
                 ("SWORD_TARGET_PORT", "8080"),
                 ("SWORD_SLOW_THRESHOLD_MS", "100"),
             ]),
@@ -323,14 +390,14 @@ mod tests {
     fn rejects_invalid_daemonset_environment() {
         assert!(
             LoaderOptions::parse_with_env(
-                [],
+                std::iter::empty::<&str>(),
                 env_reader(&[("SWORD_TARGET_PORT", "70000")]),
             )
             .is_err()
         );
         assert!(
             LoaderOptions::parse_with_env(
-                [],
+                std::iter::empty::<&str>(),
                 env_reader(&[("SWORD_SLOW_THRESHOLD_MS", "0")]),
             )
             .is_err()

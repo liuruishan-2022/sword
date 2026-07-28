@@ -22,7 +22,23 @@ program.
 
 ## Risk ReadTimeout short-term tracing
 
-Run `sword` on the Kubernetes node that hosts the target service:
+The DaemonSet discovers every matching Risk process in the host PID namespace and refreshes the
+target process/thread maps every five seconds:
+
+```yaml
+env:
+- name: SWORD_TARGET_CMDLINE
+  value: "content-risk-control-service.jar"
+- name: SWORD_TARGET_PORT
+  value: "8080"
+- name: SWORD_SLOW_THRESHOLD_MS
+  value: "100"
+```
+
+`SWORD_TARGET_PORT` is the Risk Pod's listening port, not its NodePort. A Risk Pod restart does not
+require a DaemonSet restart.
+
+For a one-off manual diagnosis, run `sword` on the Kubernetes node that hosts the target service:
 
 ```shell
 sudo RUST_LOG=info ./target/release/sword \

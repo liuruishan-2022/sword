@@ -184,8 +184,12 @@ fn read_target_server_socket_tuple(sk: *const sock) -> Result<TcpSocketTuple, u3
     let Some(config) = crate::common::risk_target_config() else {
         return Err(1);
     };
+    let current_tgid = (bpf_get_current_pid_tgid() >> 32) as u32;
+    if !crate::common::is_risk_target_tgid(current_tgid) {
+        return Err(1);
+    }
     let tuple = read_tcp_socket_tuple(sk)?;
-    if tuple.pid != config.tgid || tuple.sport != config.server_port {
+    if tuple.sport != config.server_port {
         return Err(1);
     }
     Ok(tuple)
