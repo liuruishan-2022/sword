@@ -5,7 +5,7 @@ use prometheus_client::encoding::{EncodeLabelSet, text::encode};
 use prometheus_client::metrics::family::Family;
 use prometheus_client::metrics::gauge::Gauge;
 use prometheus_client::registry::Registry;
-use sword_common::{SlowTcpEvent, SysEnterType};
+use sword_common::{SLOW_TCP_PHASE_ARRIVAL_TO_READ, SlowTcpEvent, SysEnterType};
 
 ///
 /// 放置network相關的指標獲取
@@ -31,6 +31,9 @@ pub struct NetworkMetrics {
     target_tcp_write_total: Gauge<u64, AtomicU64>,
     target_tcp_read_to_write_slow_total: Gauge<u64, AtomicU64>,
     target_event_dropped_total: Gauge<u64, AtomicU64>,
+    target_tcp_payload_arrival_total: Gauge<u64, AtomicU64>,
+    target_tcp_arrival_to_read_total: Gauge<u64, AtomicU64>,
+    target_tcp_arrival_to_read_slow_total: Gauge<u64, AtomicU64>,
 }
 
 impl NetworkMetrics {
@@ -90,6 +93,24 @@ impl NetworkMetrics {
             "Total slow TCP events dropped because the event buffer was full",
             target_event_dropped_total.clone(),
         );
+        let target_tcp_payload_arrival_total = Gauge::default();
+        registry.register(
+            "sword_target_tcp_payload_arrival_total",
+            "Total TCP payload arrivals for the target server port",
+            target_tcp_payload_arrival_total.clone(),
+        );
+        let target_tcp_arrival_to_read_total = Gauge::default();
+        registry.register(
+            "sword_target_tcp_arrival_to_read_total",
+            "Total target TCP payload arrivals correlated with a successful application read",
+            target_tcp_arrival_to_read_total.clone(),
+        );
+        let target_tcp_arrival_to_read_slow_total = Gauge::default();
+        registry.register(
+            "sword_target_tcp_arrival_to_read_slow_total",
+            "Total target TCP payload arrival to application read latencies that exceeded the threshold",
+            target_tcp_arrival_to_read_slow_total.clone(),
+        );
         Self {
             pid_tcp_total,
             sys_enter_statistics,
@@ -100,6 +121,9 @@ impl NetworkMetrics {
             target_tcp_write_total,
             target_tcp_read_to_write_slow_total,
             target_event_dropped_total,
+            target_tcp_payload_arrival_total,
+            target_tcp_arrival_to_read_total,
+            target_tcp_arrival_to_read_slow_total,
         }
     }
 
@@ -131,6 +155,9 @@ impl NetworkMetrics {
         writes: u64,
         slow_requests: u64,
         dropped_events: u64,
+        payload_arrivals: u64,
+        arrival_to_reads: u64,
+        slow_arrival_to_reads: u64,
     ) {
         self.target_tcp_retransmit_total.set(retransmits);
         self.target_tcp_receive_reset_total.set(receive_resets);
@@ -139,6 +166,10 @@ impl NetworkMetrics {
         self.target_tcp_write_total.set(writes);
         self.target_tcp_read_to_write_slow_total.set(slow_requests);
         self.target_event_dropped_total.set(dropped_events);
+        self.target_tcp_payload_arrival_total.set(payload_arrivals);
+        self.target_tcp_arrival_to_read_total.set(arrival_to_reads);
+        self.target_tcp_arrival_to_read_slow_total
+            .set(slow_arrival_to_reads);
     }
 }
 
@@ -178,6 +209,9 @@ impl NetworkCollector {
             self.per_cpu_counter(4)?,
             self.per_cpu_counter(5)?,
             self.per_cpu_counter(6)?,
+            self.per_cpu_counter(7)?,
+            self.per_cpu_counter(8)?,
+            self.per_cpu_counter(9)?,
         );
         Ok(())
     }
@@ -240,8 +274,13 @@ pub(crate) fn decode_slow_tcp_event(bytes: &[u8]) -> Option<SlowTcpEvent> {
 }
 
 pub(crate) fn format_slow_tcp_event(event: &SlowTcpEvent) -> String {
+    let phase = if event.phase == SLOW_TCP_PHASE_ARRIVAL_TO_READ {
+        "arrival-to-read"
+    } else {
+        "read-to-write"
+    };
     format!(
-        "target tcp read-to-write slow latency_ms={:.3} pid={} tid={} src={}:{} dst={}:{} family={}",
+        "target tcp {phase} slow latency_ms={:.3} pid={} tid={} src={}:{} dst={}:{} family={}",
         event.latency_ns as f64 / 1_000_000.0,
         event.tgid,
         event.tid,
@@ -259,7 +298,9 @@ mod tests {
 
     use std::{mem::size_of, slice};
 
-    use sword_common::SlowTcpEvent;
+    use sword_common::{
+        SLOW_TCP_PHASE_ARRIVAL_TO_READ, SLOW_TCP_PHASE_READ_TO_WRITE, SlowTcpEvent,
+    };
 
     use super::{NetworkMetrics, decode_slow_tcp_event, format_slow_tcp_event};
 
@@ -267,7 +308,7 @@ mod tests {
     fn exports_target_tcp_transport_metrics() {
         let mut registry = Registry::default();
         let metrics = NetworkMetrics::new(&mut registry);
-        metrics.set_target_tcp_events(7, 6, 5, 4, 3, 2, 1);
+        metrics.set_target_tcp_events(7, 6, 5, 4, 3, 2, 1, 8, 9, 10);
 
         let mut output = String::new();
         encode(&mut output, &registry).unwrap();
@@ -279,6 +320,9 @@ mod tests {
         assert!(output.contains("sword_target_tcp_write_total 3"));
         assert!(output.contains("sword_target_tcp_read_to_write_slow_total 2"));
         assert!(output.contains("sword_target_event_dropped_total 1"));
+        assert!(output.contains("sword_target_tcp_payload_arrival_total 8"));
+        assert!(output.contains("sword_target_tcp_arrival_to_read_total 9"));
+        assert!(output.contains("sword_target_tcp_arrival_to_read_slow_total 10"));
     }
 
     #[test]
@@ -293,6 +337,7 @@ mod tests {
             source_port: 8080,
             destination_port: 54321,
             family: 2,
+            phase: SLOW_TCP_PHASE_READ_TO_WRITE,
             _pad: 0,
         };
         let bytes = unsafe {
@@ -310,5 +355,27 @@ mod tests {
         assert!(line.contains("pid=42 tid=43"));
         assert!(line.contains("src=172.16.15.139:8080"));
         assert!(!line.contains("content"));
+    }
+
+    #[test]
+    fn formats_arrival_to_read_slow_phase() {
+        let event = SlowTcpEvent {
+            timestamp_ns: 1,
+            latency_ns: 456_000_000,
+            tgid: 42,
+            tid: 43,
+            source_addr_v4: u32::from_be_bytes([172, 16, 15, 139]),
+            destination_addr_v4: u32::from_be_bytes([172, 16, 1, 30]),
+            source_port: 8080,
+            destination_port: 54321,
+            family: 2,
+            phase: SLOW_TCP_PHASE_ARRIVAL_TO_READ,
+            _pad: 0,
+        };
+
+        let line = format_slow_tcp_event(&event);
+
+        assert!(line.contains("target tcp arrival-to-read slow"));
+        assert!(line.contains("latency_ms=456.000"));
     }
 }

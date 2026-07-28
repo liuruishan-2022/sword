@@ -19,7 +19,9 @@ use aya_ebpf::{
     maps::{Array, HashMap, PerCpuArray, PerCpuHashMap, RingBuf},
     programs::{ProbeContext, RetProbeContext, TracePointContext},
 };
-use sword_common::{SlowTcpEvent, SysEnterType, TargetPid};
+use sword_common::{
+    SLOW_TCP_PHASE_READ_TO_WRITE, SlowTcpEvent, SysEnterType, TargetPid,
+};
 
 const AF_INET: u16 = 2;
 const AF_INET6: u16 = 10;
@@ -120,6 +122,7 @@ fn try_tcp_sendmsg(ctx: ProbeContext) -> Result<u32, u32> {
         source_port: tuple.sport,
         destination_port: tuple.dport,
         family: tuple.family,
+        phase: SLOW_TCP_PHASE_READ_TO_WRITE,
         _pad: 0,
     };
     if SLOW_TCP_EVENTS.output::<SlowTcpEvent>(&event, 0).is_err() {
