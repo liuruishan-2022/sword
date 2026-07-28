@@ -285,3 +285,119 @@ Expected: 五类事件均存在；缺失项在验收记录中明确标记。
 git add README.md
 git commit -m "docs: add risk read timeout tracing guide"
 ```
+
+### Task 6: DaemonSet CMDLINE 自动发现
+
+**Files:**
+- Modify: `sword-common/src/lib.rs`
+- Modify: `sword-ebpf/src/common/mod.rs`
+- Modify: `sword-ebpf/src/network/tcp.rs`
+- Modify: `sword/src/loader/mod.rs`
+- Modify: `sword/src/loader/cpu.rs`
+- Modify: `sword/src/loader/network.rs`
+- Modify: `deployment.yaml`
+- Modify: `README.md`
+- Test: `sword/src/loader/mod.rs`
+- Test: `sword/src/loader/cpu.rs`
+
+**Interfaces:**
+- Consumes env: `SWORD_TARGET_CMDLINE`, `SWORD_TARGET_PORT`,
+  `SWORD_SLOW_THRESHOLD_MS`
+- Produces map: `RISK_TARGET_TGIDS: HashMap<u32, u8>`
+- Produces discovery: `SchedSwitchTarget::Cmdline(String)`
+- Preserves CLI: `--target-pid`, `--server-port`, `--slow-threshold-ms`
+
+- [ ] **Step 1: 写环境变量解析失败和覆盖测试**
+
+验证 CMDLINE、端口和阈值进入 `LoaderOptions`，非法端口和阈值返回错误，CLI值覆盖环境
+变量值。
+
+- [ ] **Step 2: 运行参数测试并确认失败**
+
+Run:
+
+```bash
+cargo test -p sword loader::tests --no-default-features \
+  --config 'target."cfg(all())".runner="env"'
+```
+
+Expected: FAIL，`LoaderOptions` 尚无 `target_cmdline` 和环境变量解析入口。
+
+- [ ] **Step 3: 实现最小环境变量解析**
+
+`LoaderOptions::parse_with_env` 先读取以下默认配置，再用CLI覆盖：
+
+```text
+SWORD_TARGET_CMDLINE
+SWORD_TARGET_PORT=8080
+SWORD_SLOW_THRESHOLD_MS=100
+```
+
+空CMDLINE视为未配置；端口和阈值必须是大于0的整数。
+
+- [ ] **Step 4: 写CMDLINE进程发现测试**
+
+把NUL分隔的命令行解析为参数，验证
+`java\0-jar\0content-risk-control-service.jar\0`命中，其他Jar不命中；验证一次刷新同时
+产生TGID集合和TID集合。
+
+- [ ] **Step 5: 运行发现测试并确认失败**
+
+Run:
+
+```bash
+cargo test -p sword loader::cpu::tests --no-default-features \
+  --config 'target."cfg(all())".runner="env"'
+```
+
+Expected: FAIL，`SchedSwitchTarget::Cmdline` 尚不存在。
+
+- [ ] **Step 6: 实现动态TGID/TID刷新**
+
+扩展现有5秒刷新器，使其同时维护：
+
+```text
+RISK_TARGET_TGIDS: tgid -> 1
+SCHED_SWITCH_TARGET_TIDS: tid -> 1
+```
+
+扫描错误只记录WARN并保留或清理可确认的旧集合；零匹配不是启动失败。
+
+- [ ] **Step 7: 调整eBPF目标过滤**
+
+TCP读写首先使用当前TGID查询 `RISK_TARGET_TGIDS`，命中后再读取socket并检查本地端口。
+全局配置Map始终写入端口和慢阈值，避免未配置时使用零值阈值。
+
+- [ ] **Step 8: 更新DaemonSet配置**
+
+将示例目标改为：
+
+```yaml
+- name: SWORD_TARGET_CMDLINE
+  value: "content-risk-control-service.jar"
+- name: SWORD_TARGET_PORT
+  value: "8080"
+- name: SWORD_SLOW_THRESHOLD_MS
+  value: "100"
+```
+
+- [ ] **Step 9: 运行完整验证**
+
+Run:
+
+```bash
+cargo fmt --all -- --check
+cargo test -p sword --no-default-features \
+  --config 'target."cfg(all())".runner="env"'
+cargo build -p sword --release
+```
+
+Expected: 全部测试PASS，release构建成功。
+
+- [ ] **Step 10: 提交**
+
+```bash
+git add sword-common sword-ebpf/src/common/mod.rs sword-ebpf/src/network/tcp.rs \
+  sword/src/loader deployment.yaml README.md
+git commit -m "feat: discover daemonset targets by cmdline"
+```

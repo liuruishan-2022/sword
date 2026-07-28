@@ -15,10 +15,38 @@ Cilium 流量采集和 Kubernetes Pod 自动发现。
 ## 运行边界
 
 - 采集器运行在 Risk Pod 所在 Node 上，通过明确的目标 TGID/PID 过滤。
+- DaemonSet 通过 `SWORD_TARGET_CMDLINE=content-risk-control-service.jar` 在宿主机
+  `/proc` 中自动发现目标 TGID；不在 YAML 中配置易失效的静态 PID。
 - TCP 读写额外按服务端本地端口过滤。
 - 默认慢阈值为 100ms，可通过启动参数配置。
 - 采集用于 5～15 分钟的短时诊断，不默认作为全节点永久全量采集。
 - 不采集请求体、响应体、手机号、短信内容、HTTP Header 或 requestId。
+
+## DaemonSet 目标发现
+
+DaemonSet 使用 `hostPID: true` 读取宿主机 `/proc/<tgid>/cmdline`。进程的任一启动参数
+包含 `SWORD_TARGET_CMDLINE` 时，将该 TGID 和它的全部 TID 加入目标 Map。139 Node
+已确认 Risk 进程为：
+
+```text
+java -jar content-risk-control-service.jar
+```
+
+运行配置为：
+
+```yaml
+SWORD_TARGET_CMDLINE: content-risk-control-service.jar
+SWORD_TARGET_PORT: "8080"
+SWORD_SLOW_THRESHOLD_MS: "100"
+```
+
+用户态每 5 秒重新扫描一次：新增 Risk 进程时加入 TGID/TID，Pod 退出或重启后删除旧
+TGID/TID。同一 Node 上的多个 Risk Pod 使用同一个端口和阈值，可以同时进入目标集合。
+若暂时没有匹配进程，Map 保持为空并等待下一次扫描，不使用 PID 或阈值零值执行采集。
+
+兼容现有手工诊断参数 `--target-pid`，其优先级高于 CMDLINE；原有
+`SWORD_SCHED_SWITCH_PID` 和 `SWORD_SCHED_SWITCH_COMM` 继续保留，但不用于生产 Risk
+定位。
 
 ## 第一阶段：调度和 TCP 异常
 
@@ -92,6 +120,7 @@ eBPF Map 使用 socket 指针值作为短生命周期关联键，连接关闭或
 ## 性能控制
 
 - 所有探针首先执行目标 PID/TID 或端口过滤。
+- TCP 探针先查询目标 TGID Map，再读取 socket 元数据。
 - 调度事件只操作 BPF Map，不逐事件进入 RingBuf。
 - TCP 正常读写不逐事件进入 RingBuf，仅慢事件上报。
 - Map 使用固定容量，插入失败或 RingBuf 满时只增加丢弃计数。
@@ -108,4 +137,3 @@ eBPF Map 使用 socket 指针值作为短生命周期关联键，连接关闭或
   - 制造重传或 RST 时对应计数增加。
 - 性能验证：相同压测基线下确认采集开销是否可接受；若调度探针影响明显，可独立关闭
   调度阶段，仅保留 TCP 读写诊断。
-
