@@ -10,13 +10,28 @@ pub mod network;
 
 #[derive(Debug)]
 pub struct LoaderOptions {
-    pub tcp_sendmsg_pid: Option<u32>,
+    pub target_pid: Option<u32>,
+    pub server_port: u16,
+    pub slow_threshold_ms: u64,
 }
 
 impl LoaderOptions {
     pub fn parse_args() -> anyhow::Result<Self> {
-        let mut args = std::env::args().skip(1);
-        let mut tcp_sendmsg_pid = None;
+        Self::parse(std::env::args().skip(1))
+    }
+
+    fn parse<I, S>(args: I) -> anyhow::Result<Self>
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        const DEFAULT_SERVER_PORT: u16 = 8080;
+        const DEFAULT_SLOW_THRESHOLD_MS: u64 = 100;
+
+        let mut args = args.into_iter().map(Into::into);
+        let mut target_pid = None;
+        let mut server_port = DEFAULT_SERVER_PORT;
+        let mut slow_threshold_ms = DEFAULT_SLOW_THRESHOLD_MS;
 
         while let Some(arg) = args.next() {
             match arg.as_str() {
@@ -28,17 +43,51 @@ impl LoaderOptions {
                     let pid = value
                         .parse::<u32>()
                         .map_err(|err| anyhow::anyhow!("invalid --target-pid {value}: {err}"))?;
-                    tcp_sendmsg_pid = Some(pid);
+                    if pid == 0 {
+                        return Err(anyhow::anyhow!("--target-pid must be greater than 0"));
+                    }
+                    target_pid = Some(pid);
+                }
+                "--server-port" => {
+                    let value = args
+                        .next()
+                        .ok_or_else(|| anyhow::anyhow!("--server-port requires a value"))?;
+                    server_port = value
+                        .parse::<u16>()
+                        .map_err(|err| anyhow::anyhow!("invalid --server-port {value}: {err}"))?;
+                    if server_port == 0 {
+                        return Err(anyhow::anyhow!("--server-port must be greater than 0"));
+                    }
+                }
+                "--slow-threshold-ms" => {
+                    let value = args
+                        .next()
+                        .ok_or_else(|| anyhow::anyhow!("--slow-threshold-ms requires a value"))?;
+                    slow_threshold_ms = value.parse::<u64>().map_err(|err| {
+                        anyhow::anyhow!("invalid --slow-threshold-ms {value}: {err}")
+                    })?;
+                    if slow_threshold_ms == 0 {
+                        return Err(anyhow::anyhow!(
+                            "--slow-threshold-ms must be greater than 0"
+                        ));
+                    }
                 }
                 "--help" | "-h" => {
-                    println!("Usage: sword [--target-pid PID]");
+                    println!(
+                        "Usage: sword [--target-pid PID] [--server-port PORT] \
+                         [--slow-threshold-ms MILLIS]"
+                    );
                     std::process::exit(0);
                 }
                 _ => return Err(anyhow::anyhow!("unknown argument: {arg}")),
             }
         }
 
-        Ok(Self { tcp_sendmsg_pid })
+        Ok(Self {
+            target_pid,
+            server_port,
+            slow_threshold_ms,
+        })
     }
 }
 
@@ -140,6 +189,44 @@ impl ToString for TracePointConfig {
 pub struct KProberConfig {
     name: String,
     fn_name: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::LoaderOptions;
+
+    #[test]
+    fn parse_risk_target_defaults() {
+        let options = LoaderOptions::parse(["--target-pid", "1234"]).unwrap();
+        assert_eq!(options.target_pid, Some(1234));
+        assert_eq!(options.server_port, 8080);
+        assert_eq!(options.slow_threshold_ms, 100);
+    }
+
+    #[test]
+    fn parse_risk_target_overrides() {
+        let options = LoaderOptions::parse([
+            "--target-pid",
+            "1234",
+            "--server-port",
+            "9090",
+            "--slow-threshold-ms",
+            "250",
+        ])
+        .unwrap();
+        assert_eq!(options.target_pid, Some(1234));
+        assert_eq!(options.server_port, 9090);
+        assert_eq!(options.slow_threshold_ms, 250);
+    }
+
+    #[test]
+    fn parse_risk_target_rejects_invalid_values() {
+        assert!(LoaderOptions::parse(["--target-pid", "abc"]).is_err());
+        assert!(LoaderOptions::parse(["--target-pid", "0"]).is_err());
+        assert!(LoaderOptions::parse(["--server-port", "70000"]).is_err());
+        assert!(LoaderOptions::parse(["--server-port", "0"]).is_err());
+        assert!(LoaderOptions::parse(["--slow-threshold-ms", "0"]).is_err());
+    }
 }
 
 impl KProberConfig {
