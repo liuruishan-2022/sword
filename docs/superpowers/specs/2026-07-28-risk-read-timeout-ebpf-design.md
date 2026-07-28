@@ -2,15 +2,15 @@
 
 ## 目标
 
-在不读取 HTTP 报文内容的前提下，定位 `content-risk-control-service` 压测期间偶发
-ReadTimeout 是否与以下因素相关：
+定位 `content-risk-control-service` 压测期间偶发 ReadTimeout 是否与以下因素相关：
 
 - Risk 进程线程被唤醒后长时间得不到 CPU；
 - Risk 连接出现 TCP 重传或 RST；
 - Risk 进程读取请求后，超过 100ms 才开始写响应。
 
-本次仅实现第一、第二阶段。不实现 `tcp_rcv_established`、数据包抓取、HTTP 解析、
-Cilium 流量采集和 Kubernetes Pod 自动发现。
+在原有传输阶段观测上，额外只提取 HTTP JSON 中的 `requestId`。当报文到达 Socket
+到首次响应写入达到 500ms 时，输出同一请求的三段耗时，供 MTR 和 Risk 日志关联。
+不实现完整 HTTP 解析、数据包抓取或 Cilium 流量采集。
 
 ## 运行边界
 
@@ -20,7 +20,8 @@ Cilium 流量采集和 Kubernetes Pod 自动发现。
 - TCP 读写额外按服务端本地端口过滤。
 - 默认慢阈值为 100ms，可通过启动参数配置。
 - 采集用于 5～15 分钟的短时诊断，不默认作为全节点永久全量采集。
-- 不采集请求体、响应体、手机号、短信内容、HTTP Header 或 requestId。
+- 不保存请求体、响应体、手机号、短信内容或 HTTP Header。只限量扫描
+  `tcp_recvmsg` 用户缓冲区的前 512 字节并保留 `requestId`，其他内容立即丢弃。
 
 ## DaemonSet 目标发现
 
@@ -98,8 +99,30 @@ read-to-write latency = tcp_sendmsg 时间 - tcp_recvmsg 成功返回时间
 ### 连接关联
 
 eBPF Map 使用 socket 指针值作为短生命周期关联键，连接关闭或完成首次响应写入后
-删除对应状态。该方式不解析 HTTP，因此只用于判断 Risk 从读取到开始写响应的内核
-边界耗时，不宣称等价于完整 HTTP 服务端耗时。
+删除对应状态。
+
+### 慢请求关联
+
+`tcp_recvmsg` 入口根据压测节点 `5.14.0-479.el9.x86_64` 的 BTF 布局读取
+`msghdr.msg_iter`，保存首个用户缓冲区地址；返回点读取成功数据并通过跨分片状态机
+提取 `"requestId":"..."`。支持 `ITER_IOVEC` 和 `ITER_UBUF`。
+
+首次 `tcp_sendmsg` 计算：
+
+```text
+arrival_to_read = tcp_recvmsg完成 - 首个TCP payload到达
+read_to_write = 首次tcp_sendmsg - tcp_recvmsg完成
+arrival_to_write = 首次tcp_sendmsg - 首个TCP payload到达
+```
+
+仅当 `arrival_to_write >= 500ms` 且已提取到 requestId 时输出：
+
+```text
+target http slow requestId=... arrival_to_read_ms=... read_to_write_ms=...
+arrival_to_write_ms=... pid=... tid=... src=... dst=... family=...
+```
+
+扫描缓冲区使用单元素 Per-CPU Map，不占用 BPF 512 字节栈，也不会在 CPU 之间共享。
 
 ## 指标
 
@@ -115,7 +138,8 @@ eBPF Map 使用 socket 指针值作为短生命周期关联键，连接关闭或
 - `sword_target_tcp_read_to_write_slow_total`
 - `sword_target_event_dropped_total`
 
-慢事件日志只包含耗时、PID/TID、线程名、连接地址和端口，不包含任何报文内容。
+普通慢事件日志只包含耗时、PID/TID、连接地址和端口；500ms 慢请求额外包含
+requestId，不包含短信内容或其他报文内容。
 
 ## 性能控制
 
@@ -123,6 +147,7 @@ eBPF Map 使用 socket 指针值作为短生命周期关联键，连接关闭或
 - TCP 探针先查询目标 TGID Map，再读取 socket 元数据。
 - 调度事件只操作 BPF Map，不逐事件进入 RingBuf。
 - TCP 正常读写不逐事件进入 RingBuf，仅慢事件上报。
+- requestId 只扫描目标 TGID、目标服务端口的成功读取，每次最多 512 字节。
 - Map 使用固定容量，插入失败或 RingBuf 满时只增加丢弃计数。
 - 通过相同压测场景对比未开启和开启采集时的 TPS、p99、Node CPU。
 

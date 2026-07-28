@@ -5,7 +5,9 @@ use prometheus_client::encoding::{EncodeLabelSet, text::encode};
 use prometheus_client::metrics::family::Family;
 use prometheus_client::metrics::gauge::Gauge;
 use prometheus_client::registry::Registry;
-use sword_common::{SLOW_TCP_PHASE_ARRIVAL_TO_READ, SlowTcpEvent, SysEnterType};
+use sword_common::{
+    SLOW_TCP_PHASE_ARRIVAL_TO_READ, SLOW_TCP_PHASE_ARRIVAL_TO_WRITE, SlowTcpEvent, SysEnterType,
+};
 
 ///
 /// 放置network相關的指標獲取
@@ -274,6 +276,22 @@ pub(crate) fn decode_slow_tcp_event(bytes: &[u8]) -> Option<SlowTcpEvent> {
 }
 
 pub(crate) fn format_slow_tcp_event(event: &SlowTcpEvent) -> String {
+    if event.phase == SLOW_TCP_PHASE_ARRIVAL_TO_WRITE {
+        let request_id = std::str::from_utf8(event.request_id.as_bytes()).unwrap_or("<invalid>");
+        return format!(
+            "target http slow requestId={request_id} arrival_to_read_ms={:.3} read_to_write_ms={:.3} arrival_to_write_ms={:.3} pid={} tid={} src={}:{} dst={}:{} family={}",
+            event.arrival_to_read_ns as f64 / 1_000_000.0,
+            event.read_to_write_ns as f64 / 1_000_000.0,
+            event.latency_ns as f64 / 1_000_000.0,
+            event.tgid,
+            event.tid,
+            Ipv4Addr::from(event.source_addr_v4),
+            event.source_port,
+            Ipv4Addr::from(event.destination_addr_v4),
+            event.destination_port,
+            event.family
+        );
+    }
     let phase = if event.phase == SLOW_TCP_PHASE_ARRIVAL_TO_READ {
         "arrival-to-read"
     } else {
@@ -299,7 +317,8 @@ mod tests {
     use std::{mem::size_of, slice};
 
     use sword_common::{
-        SLOW_TCP_PHASE_ARRIVAL_TO_READ, SLOW_TCP_PHASE_READ_TO_WRITE, SlowTcpEvent,
+        HttpRequestIdState, SLOW_TCP_PHASE_ARRIVAL_TO_READ, SLOW_TCP_PHASE_ARRIVAL_TO_WRITE,
+        SLOW_TCP_PHASE_READ_TO_WRITE, SlowTcpEvent,
     };
 
     use super::{NetworkMetrics, decode_slow_tcp_event, format_slow_tcp_event};
@@ -330,6 +349,8 @@ mod tests {
         let event = SlowTcpEvent {
             timestamp_ns: 1,
             latency_ns: 123_000_000,
+            arrival_to_read_ns: 0,
+            read_to_write_ns: 0,
             tgid: 42,
             tid: 43,
             source_addr_v4: u32::from_be_bytes([172, 16, 15, 139]),
@@ -339,6 +360,7 @@ mod tests {
             family: 2,
             phase: SLOW_TCP_PHASE_READ_TO_WRITE,
             _pad: 0,
+            request_id: Default::default(),
         };
         let bytes = unsafe {
             slice::from_raw_parts(
@@ -362,6 +384,8 @@ mod tests {
         let event = SlowTcpEvent {
             timestamp_ns: 1,
             latency_ns: 456_000_000,
+            arrival_to_read_ns: 0,
+            read_to_write_ns: 0,
             tgid: 42,
             tid: 43,
             source_addr_v4: u32::from_be_bytes([172, 16, 15, 139]),
@@ -371,11 +395,42 @@ mod tests {
             family: 2,
             phase: SLOW_TCP_PHASE_ARRIVAL_TO_READ,
             _pad: 0,
+            request_id: Default::default(),
         };
 
         let line = format_slow_tcp_event(&event);
 
         assert!(line.contains("target tcp arrival-to-read slow"));
         assert!(line.contains("latency_ms=456.000"));
+    }
+
+    #[test]
+    fn formats_slow_http_request_with_request_id_and_phase_latencies() {
+        let mut request_id = HttpRequestIdState::default();
+        request_id.consume(br#"{"requestId":"7fbb215d-a5d1-4478-b134-fad7a388dea3","items":[]}"#);
+        let event = SlowTcpEvent {
+            timestamp_ns: 1,
+            latency_ns: 650_000_000,
+            arrival_to_read_ns: 50_000_000,
+            read_to_write_ns: 600_000_000,
+            tgid: 42,
+            tid: 43,
+            source_addr_v4: u32::from_be_bytes([172, 16, 15, 139]),
+            destination_addr_v4: u32::from_be_bytes([172, 16, 1, 30]),
+            source_port: 8080,
+            destination_port: 54321,
+            family: 2,
+            phase: SLOW_TCP_PHASE_ARRIVAL_TO_WRITE,
+            _pad: 0,
+            request_id: request_id.request_id(),
+        };
+
+        let line = format_slow_tcp_event(&event);
+
+        assert!(line.contains("target http slow"));
+        assert!(line.contains("requestId=7fbb215d-a5d1-4478-b134-fad7a388dea3"));
+        assert!(line.contains("arrival_to_read_ms=50.000"));
+        assert!(line.contains("read_to_write_ms=600.000"));
+        assert!(line.contains("arrival_to_write_ms=650.000"));
     }
 }
