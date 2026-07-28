@@ -10,23 +10,26 @@ use crate::{
 /// 发送数据: sys_enter_write->tcp_sendmsg->tcp_write_xmit->tcp_transmit_skb->ip_queue_xmit->dev_queue_xmit
 ///
 use aya_ebpf::{
-    bindings::{BPF_TCP_ESTABLISHED, BPF_TCP_SYN_SENT, sockaddr},
+    bindings::{BPF_TCP_CLOSE, BPF_TCP_ESTABLISHED, BPF_TCP_SYN_SENT, sockaddr},
     helpers::{
         bpf_get_current_pid_tgid, bpf_probe_read_kernel, bpf_probe_read_user,
         generated::bpf_ktime_get_ns,
     },
-    macros::{kprobe, map, tracepoint},
-    maps::{Array, HashMap, PerCpuArray, PerCpuHashMap},
-    programs::{ProbeContext, TracePointContext},
+    macros::{kprobe, kretprobe, map, tracepoint},
+    maps::{Array, HashMap, PerCpuArray, PerCpuHashMap, RingBuf},
+    programs::{ProbeContext, RetProbeContext, TracePointContext},
 };
-use aya_log_ebpf::info;
-use sword_common::{SysEnterType, TargetPid};
+use sword_common::{SlowTcpEvent, SysEnterType, TargetPid};
 
 const AF_INET: u16 = 2;
 const AF_INET6: u16 = 10;
 const RISK_TCP_RETRANSMIT_INDEX: u32 = 0;
 const RISK_TCP_RECEIVE_RESET_INDEX: u32 = 1;
 const RISK_TCP_SEND_RESET_INDEX: u32 = 2;
+const RISK_TCP_READ_INDEX: u32 = 3;
+const RISK_TCP_WRITE_INDEX: u32 = 4;
+const RISK_TCP_SLOW_INDEX: u32 = 5;
+const RISK_TCP_EVENT_DROPPED_INDEX: u32 = 6;
 
 #[map]
 pub static TARGET_PID: Array<TargetPid> = Array::with_max_entries(1, 0);
@@ -39,6 +42,15 @@ pub static START: HashMap<u64, u64> = HashMap::with_max_entries(4096, 0);
 
 #[map]
 pub static RISK_TCP_COUNTERS: PerCpuArray<u64> = PerCpuArray::with_max_entries(7, 0);
+
+#[map]
+pub static TCP_RECV_INFLIGHT: HashMap<u32, u64> = HashMap::with_max_entries(4096, 0);
+
+#[map]
+pub static TCP_REQUEST_START: HashMap<u64, u64> = HashMap::with_max_entries(32768, 0);
+
+#[map]
+pub static SLOW_TCP_EVENTS: RingBuf = RingBuf::with_byte_size(256 * 1024, 0);
 
 ///
 /// 这个主要是统计我们的SYS_ENTER的调用统计
@@ -78,57 +90,45 @@ pub fn tcp_sendmsg(ctx: ProbeContext) -> u32 {
 }
 
 fn try_tcp_sendmsg(ctx: ProbeContext) -> Result<u32, u32> {
-    if !matches_tcp_sendmsg_target()? {
+    let sk: *const sock = ctx.arg(0).ok_or(1u32)?;
+    let tuple = read_target_server_socket_tuple(sk)?;
+    increment_risk_tcp_counter(RISK_TCP_WRITE_INDEX);
+
+    let socket_key = sk as u64;
+    let Some(start_ns) = (unsafe { TCP_REQUEST_START.get(&socket_key) }).copied() else {
+        return Ok(0);
+    };
+    let _ = TCP_REQUEST_START.remove(&socket_key);
+
+    let now_ns = unsafe { bpf_ktime_get_ns() };
+    let latency_ns = now_ns.saturating_sub(start_ns);
+    let Some(config) = crate::common::risk_target_config() else {
+        return Ok(0);
+    };
+    if latency_ns < config.slow_threshold_ns {
         return Ok(0);
     }
 
-    let sk: *const sock = ctx.arg(0).ok_or(1u32)?;
-    let size: usize = ctx.arg(2).ok_or(1u32)?;
-    let tuple = read_tcp_socket_tuple(sk)?;
-
-    match tuple.family {
-        AF_INET => info!(
-            &ctx,
-            "tcp_sendmsg pid={} tid={} family=ipv4 src={}.{}.{}.{}:{} dst={}.{}.{}.{}:{} size={}",
-            tuple.pid,
-            tuple.tid,
-            ipv4_octet(tuple.saddr_v4, 0),
-            ipv4_octet(tuple.saddr_v4, 1),
-            ipv4_octet(tuple.saddr_v4, 2),
-            ipv4_octet(tuple.saddr_v4, 3),
-            tuple.sport,
-            ipv4_octet(tuple.daddr_v4, 0),
-            ipv4_octet(tuple.daddr_v4, 1),
-            ipv4_octet(tuple.daddr_v4, 2),
-            ipv4_octet(tuple.daddr_v4, 3),
-            tuple.dport,
-            size
-        ),
-        AF_INET6 => info!(
-            &ctx,
-            "tcp_sendmsg pid={} tid={} family=ipv6 src={:x}:{:x}:{:x}:{:x}:{} dst={:x}:{:x}:{:x}:{:x}:{} size={}",
-            tuple.pid,
-            tuple.tid,
-            tuple.saddr_v6[0],
-            tuple.saddr_v6[1],
-            tuple.saddr_v6[2],
-            tuple.saddr_v6[3],
-            tuple.sport,
-            tuple.daddr_v6[0],
-            tuple.daddr_v6[1],
-            tuple.daddr_v6[2],
-            tuple.daddr_v6[3],
-            tuple.dport,
-            size
-        ),
-        _ => info!(
-            &ctx,
-            "tcp_sendmsg pid={} tid={} family={} size={}", tuple.pid, tuple.tid, tuple.family, size
-        ),
+    increment_risk_tcp_counter(RISK_TCP_SLOW_INDEX);
+    let event = SlowTcpEvent {
+        timestamp_ns: now_ns,
+        latency_ns,
+        tgid: tuple.pid,
+        tid: tuple.tid,
+        source_addr_v4: tuple.saddr_v4,
+        destination_addr_v4: tuple.daddr_v4,
+        source_port: tuple.sport,
+        destination_port: tuple.dport,
+        family: tuple.family,
+        _pad: 0,
+    };
+    if SLOW_TCP_EVENTS.output::<SlowTcpEvent>(&event, 0).is_err() {
+        increment_risk_tcp_counter(RISK_TCP_EVENT_DROPPED_INDEX);
     }
 
     Ok(0)
 }
+
 struct TcpSocketTuple {
     pid: u32,
     tid: u32,
@@ -180,8 +180,15 @@ fn read_tcp_socket_tuple(sk: *const sock) -> Result<TcpSocketTuple, u32> {
     Ok(tuple)
 }
 
-fn ipv4_octet(addr: u32, index: u32) -> u32 {
-    (addr >> (24 - index * 8)) & 0xff
+fn read_target_server_socket_tuple(sk: *const sock) -> Result<TcpSocketTuple, u32> {
+    let Some(config) = crate::common::risk_target_config() else {
+        return Err(1);
+    };
+    let tuple = read_tcp_socket_tuple(sk)?;
+    if tuple.pid != config.tgid || tuple.sport != config.server_port {
+        return Err(1);
+    }
+    Ok(tuple)
 }
 
 fn matches_tcp_sendmsg_target() -> Result<bool, u32> {
@@ -354,9 +361,42 @@ pub fn tcp_recvmsg(ctx: ProbeContext) -> u32 {
 }
 
 fn try_tcp_recvmsg(ctx: ProbeContext) -> Result<u32, i64> {
-    unsafe {
-        let sock: *const sock = ctx.arg(0).ok_or(1u32)?;
+    let sk: *const sock = ctx.arg(0).ok_or(1i64)?;
+    read_target_server_socket_tuple(sk).map_err(|_| 1i64)?;
+    let tid = bpf_get_current_pid_tgid() as u32;
+    if TCP_RECV_INFLIGHT.insert(&tid, &(sk as u64), 0).is_err() {
+        increment_risk_tcp_counter(RISK_TCP_EVENT_DROPPED_INDEX);
     }
+    Ok(0)
+}
+
+#[kretprobe]
+pub fn tcp_recvmsg_ret(ctx: RetProbeContext) -> u32 {
+    match try_tcp_recvmsg_ret(ctx) {
+        Ok(ret) => ret,
+        Err(err) => err as u32,
+    }
+}
+
+fn try_tcp_recvmsg_ret(ctx: RetProbeContext) -> Result<u32, i64> {
+    let tid = bpf_get_current_pid_tgid() as u32;
+    let Some(socket_key) = (unsafe { TCP_RECV_INFLIGHT.get(&tid) }).copied() else {
+        return Ok(0);
+    };
+    let _ = TCP_RECV_INFLIGHT.remove(&tid);
+
+    let bytes_read: i64 = ctx.ret();
+    if bytes_read <= 0 {
+        return Ok(0);
+    }
+
+    if unsafe { TCP_REQUEST_START.get(&socket_key) }.is_none() {
+        let now_ns = unsafe { bpf_ktime_get_ns() };
+        if TCP_REQUEST_START.insert(&socket_key, &now_ns, 0).is_err() {
+            increment_risk_tcp_counter(RISK_TCP_EVENT_DROPPED_INDEX);
+        }
+    }
+    increment_risk_tcp_counter(RISK_TCP_READ_INDEX);
     Ok(0)
 }
 
@@ -434,6 +474,9 @@ fn try_inet_sock_set_state(ctx: TracePointContext) -> Result<u32, i64> {
         let old_state = ctx.read_at::<u32>(16)?;
         let new_state = ctx.read_at::<u32>(20)?;
 
+        if new_state == BPF_TCP_CLOSE {
+            let _ = TCP_REQUEST_START.remove(&skaddr);
+        }
         if old_state == BPF_TCP_SYN_SENT && new_state == BPF_TCP_ESTABLISHED {
             if let Some(start_ns) = START.get(&skaddr) {
                 let current_ns = bpf_ktime_get_ns();

@@ -11,7 +11,9 @@ const TARGET_PID: &str = "TARGET_PID";
 
 pub fn load_network_kprobe(ebpf: &mut aya::Ebpf, options: &LoaderOptions) -> anyhow::Result<()> {
     let kprobe_configs = vec![
-        // KProberConfig::new("tcp_sendmsg", "tcp_sendmsg"),
+        KProberConfig::new("tcp_sendmsg", "tcp_sendmsg"),
+        KProberConfig::new("tcp_recvmsg", "tcp_recvmsg"),
+        KProberConfig::new("tcp_recvmsg_ret", "tcp_recvmsg"),
         KProberConfig::new("tcp_v4_connect", "tcp_v4_connect"),
     ];
     if let Some(pid) = options.target_pid {

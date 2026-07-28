@@ -1,11 +1,11 @@
-use std::sync::atomic::AtomicU64;
+use std::{mem::size_of, net::Ipv4Addr, ptr, sync::atomic::AtomicU64};
 
 use aya::maps::{MapData, MapError, PerCpuArray, PerCpuHashMap};
 use prometheus_client::encoding::{EncodeLabelSet, text::encode};
 use prometheus_client::metrics::family::Family;
 use prometheus_client::metrics::gauge::Gauge;
 use prometheus_client::registry::Registry;
-use sword_common::SysEnterType;
+use sword_common::{SlowTcpEvent, SysEnterType};
 
 ///
 /// 放置network相關的指標獲取
@@ -27,6 +27,10 @@ pub struct NetworkMetrics {
     target_tcp_retransmit_total: Gauge<u64, AtomicU64>,
     target_tcp_receive_reset_total: Gauge<u64, AtomicU64>,
     target_tcp_send_reset_total: Gauge<u64, AtomicU64>,
+    target_tcp_read_total: Gauge<u64, AtomicU64>,
+    target_tcp_write_total: Gauge<u64, AtomicU64>,
+    target_tcp_read_to_write_slow_total: Gauge<u64, AtomicU64>,
+    target_event_dropped_total: Gauge<u64, AtomicU64>,
 }
 
 impl NetworkMetrics {
@@ -62,12 +66,40 @@ impl NetworkMetrics {
             "Total TCP resets sent by the target server port",
             target_tcp_send_reset_total.clone(),
         );
+        let target_tcp_read_total = Gauge::default();
+        registry.register(
+            "sword_target_tcp_read_total",
+            "Total successful TCP reads by the target server port",
+            target_tcp_read_total.clone(),
+        );
+        let target_tcp_write_total = Gauge::default();
+        registry.register(
+            "sword_target_tcp_write_total",
+            "Total TCP writes by the target server port",
+            target_tcp_write_total.clone(),
+        );
+        let target_tcp_read_to_write_slow_total = Gauge::default();
+        registry.register(
+            "sword_target_tcp_read_to_write_slow_total",
+            "Total target TCP requests whose first read to first write latency exceeded the threshold",
+            target_tcp_read_to_write_slow_total.clone(),
+        );
+        let target_event_dropped_total = Gauge::default();
+        registry.register(
+            "sword_target_event_dropped_total",
+            "Total slow TCP events dropped because the event buffer was full",
+            target_event_dropped_total.clone(),
+        );
         Self {
             pid_tcp_total,
             sys_enter_statistics,
             target_tcp_retransmit_total,
             target_tcp_receive_reset_total,
             target_tcp_send_reset_total,
+            target_tcp_read_total,
+            target_tcp_write_total,
+            target_tcp_read_to_write_slow_total,
+            target_event_dropped_total,
         }
     }
 
@@ -90,10 +122,23 @@ impl NetworkMetrics {
         self.pid_tcp_total.remove(&TcpLabels { pid });
     }
 
-    fn set_target_tcp_events(&self, retransmits: u64, receive_resets: u64, send_resets: u64) {
+    fn set_target_tcp_events(
+        &self,
+        retransmits: u64,
+        receive_resets: u64,
+        send_resets: u64,
+        reads: u64,
+        writes: u64,
+        slow_requests: u64,
+        dropped_events: u64,
+    ) {
         self.target_tcp_retransmit_total.set(retransmits);
         self.target_tcp_receive_reset_total.set(receive_resets);
         self.target_tcp_send_reset_total.set(send_resets);
+        self.target_tcp_read_total.set(reads);
+        self.target_tcp_write_total.set(writes);
+        self.target_tcp_read_to_write_slow_total.set(slow_requests);
+        self.target_event_dropped_total.set(dropped_events);
     }
 }
 
@@ -129,6 +174,10 @@ impl NetworkCollector {
             self.per_cpu_counter(0)?,
             self.per_cpu_counter(1)?,
             self.per_cpu_counter(2)?,
+            self.per_cpu_counter(3)?,
+            self.per_cpu_counter(4)?,
+            self.per_cpu_counter(5)?,
+            self.per_cpu_counter(6)?,
         );
         Ok(())
     }
@@ -183,23 +232,83 @@ fn pid_exists(pid: u32) -> bool {
     std::path::Path::new("/proc").join(pid.to_string()).exists()
 }
 
+pub(crate) fn decode_slow_tcp_event(bytes: &[u8]) -> Option<SlowTcpEvent> {
+    if bytes.len() != size_of::<SlowTcpEvent>() {
+        return None;
+    }
+    Some(unsafe { ptr::read_unaligned(bytes.as_ptr().cast::<SlowTcpEvent>()) })
+}
+
+pub(crate) fn format_slow_tcp_event(event: &SlowTcpEvent) -> String {
+    format!(
+        "target tcp read-to-write slow latency_ms={:.3} pid={} tid={} src={}:{} dst={}:{} family={}",
+        event.latency_ns as f64 / 1_000_000.0,
+        event.tgid,
+        event.tid,
+        Ipv4Addr::from(event.source_addr_v4),
+        event.source_port,
+        Ipv4Addr::from(event.destination_addr_v4),
+        event.destination_port,
+        event.family
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use prometheus_client::{encoding::text::encode, registry::Registry};
 
-    use super::NetworkMetrics;
+    use std::{mem::size_of, slice};
+
+    use sword_common::SlowTcpEvent;
+
+    use super::{NetworkMetrics, decode_slow_tcp_event, format_slow_tcp_event};
 
     #[test]
     fn exports_target_tcp_transport_metrics() {
         let mut registry = Registry::default();
         let metrics = NetworkMetrics::new(&mut registry);
-        metrics.set_target_tcp_events(3, 2, 1);
+        metrics.set_target_tcp_events(7, 6, 5, 4, 3, 2, 1);
 
         let mut output = String::new();
         encode(&mut output, &registry).unwrap();
 
-        assert!(output.contains("sword_target_tcp_retransmit_total 3"));
-        assert!(output.contains("sword_target_tcp_receive_reset_total 2"));
-        assert!(output.contains("sword_target_tcp_send_reset_total 1"));
+        assert!(output.contains("sword_target_tcp_retransmit_total 7"));
+        assert!(output.contains("sword_target_tcp_receive_reset_total 6"));
+        assert!(output.contains("sword_target_tcp_send_reset_total 5"));
+        assert!(output.contains("sword_target_tcp_read_total 4"));
+        assert!(output.contains("sword_target_tcp_write_total 3"));
+        assert!(output.contains("sword_target_tcp_read_to_write_slow_total 2"));
+        assert!(output.contains("sword_target_event_dropped_total 1"));
+    }
+
+    #[test]
+    fn decodes_and_formats_slow_tcp_metadata_without_payload() {
+        let event = SlowTcpEvent {
+            timestamp_ns: 1,
+            latency_ns: 123_000_000,
+            tgid: 42,
+            tid: 43,
+            source_addr_v4: u32::from_be_bytes([172, 16, 15, 139]),
+            destination_addr_v4: u32::from_be_bytes([172, 16, 1, 30]),
+            source_port: 8080,
+            destination_port: 54321,
+            family: 2,
+            _pad: 0,
+        };
+        let bytes = unsafe {
+            slice::from_raw_parts(
+                (&event as *const SlowTcpEvent).cast::<u8>(),
+                size_of::<SlowTcpEvent>(),
+            )
+        };
+
+        let decoded = decode_slow_tcp_event(bytes).unwrap();
+        assert_eq!(decoded, event);
+        assert!(decode_slow_tcp_event(&bytes[..bytes.len() - 1]).is_none());
+        let line = format_slow_tcp_event(&decoded);
+        assert!(line.contains("latency_ms=123.000"));
+        assert!(line.contains("pid=42 tid=43"));
+        assert!(line.contains("src=172.16.15.139:8080"));
+        assert!(!line.contains("content"));
     }
 }
