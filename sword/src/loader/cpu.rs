@@ -273,7 +273,7 @@ pub fn load_sched(ebpf: &mut aya::Ebpf, options: &LoaderOptions) -> anyhow::Resu
 
 #[cfg(test)]
 mod tests {
-    use super::parse_sched_switch_target_tgid;
+    use super::{SchedSwitchTarget, cmdline_matches, parse_sched_switch_target_tgid};
 
     #[test]
     fn parse_sched_switch_target_tgid_ignores_empty_values() {
@@ -294,5 +294,27 @@ mod tests {
     fn parse_sched_switch_target_tgid_rejects_invalid_pid() {
         let err = parse_sched_switch_target_tgid("abc").unwrap_err();
         assert!(err.to_string().contains("invalid SWORD_SCHED_SWITCH_PID"));
+    }
+
+    #[test]
+    fn matches_target_jar_in_nul_separated_cmdline() {
+        let cmdline = b"java\0-jar\0content-risk-control-service.jar\0";
+
+        assert!(cmdline_matches(
+            cmdline,
+            "content-risk-control-service.jar"
+        ));
+        assert!(!cmdline_matches(cmdline, "another-service.jar"));
+    }
+
+    #[test]
+    fn cmdline_target_description_does_not_include_full_command() {
+        let target =
+            SchedSwitchTarget::Cmdline("content-risk-control-service.jar".to_string());
+
+        assert_eq!(
+            target.description(),
+            "cmdline contains content-risk-control-service.jar"
+        );
     }
 }

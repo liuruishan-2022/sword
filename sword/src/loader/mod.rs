@@ -222,7 +222,19 @@ pub struct KProberConfig {
 
 #[cfg(test)]
 mod tests {
+    use std::{collections::HashMap, env::VarError};
+
     use super::LoaderOptions;
+
+    fn env_reader(
+        values: &[(&str, &str)],
+    ) -> impl Fn(&str) -> Result<String, VarError> + use<> {
+        let values = values
+            .iter()
+            .map(|(name, value)| ((*name).to_string(), (*value).to_string()))
+            .collect::<HashMap<_, _>>();
+        move |name| values.get(name).cloned().ok_or(VarError::NotPresent)
+    }
 
     #[test]
     fn parse_risk_target_defaults() {
@@ -255,6 +267,74 @@ mod tests {
         assert!(LoaderOptions::parse(["--server-port", "70000"]).is_err());
         assert!(LoaderOptions::parse(["--server-port", "0"]).is_err());
         assert!(LoaderOptions::parse(["--slow-threshold-ms", "0"]).is_err());
+    }
+
+    #[test]
+    fn parses_daemonset_target_from_environment() {
+        let options = LoaderOptions::parse_with_env(
+            [],
+            env_reader(&[
+                (
+                    "SWORD_TARGET_CMDLINE",
+                    "content-risk-control-service.jar",
+                ),
+                ("SWORD_TARGET_PORT", "8080"),
+                ("SWORD_SLOW_THRESHOLD_MS", "100"),
+            ]),
+        )
+        .unwrap();
+
+        assert_eq!(
+            options.target_cmdline.as_deref(),
+            Some("content-risk-control-service.jar")
+        );
+        assert_eq!(options.server_port, 8080);
+        assert_eq!(options.slow_threshold_ms, 100);
+    }
+
+    #[test]
+    fn command_line_values_override_daemonset_environment() {
+        let options = LoaderOptions::parse_with_env(
+            [
+                "--target-pid",
+                "42",
+                "--server-port",
+                "9090",
+                "--slow-threshold-ms",
+                "250",
+            ],
+            env_reader(&[
+                (
+                    "SWORD_TARGET_CMDLINE",
+                    "content-risk-control-service.jar",
+                ),
+                ("SWORD_TARGET_PORT", "8080"),
+                ("SWORD_SLOW_THRESHOLD_MS", "100"),
+            ]),
+        )
+        .unwrap();
+
+        assert_eq!(options.target_pid, Some(42));
+        assert_eq!(options.server_port, 9090);
+        assert_eq!(options.slow_threshold_ms, 250);
+    }
+
+    #[test]
+    fn rejects_invalid_daemonset_environment() {
+        assert!(
+            LoaderOptions::parse_with_env(
+                [],
+                env_reader(&[("SWORD_TARGET_PORT", "70000")]),
+            )
+            .is_err()
+        );
+        assert!(
+            LoaderOptions::parse_with_env(
+                [],
+                env_reader(&[("SWORD_SLOW_THRESHOLD_MS", "0")]),
+            )
+            .is_err()
+        );
     }
 }
 
