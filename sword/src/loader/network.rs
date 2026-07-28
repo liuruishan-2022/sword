@@ -47,7 +47,14 @@ fn tcp_sendmsg_target(pid: u32) -> TargetPid {
 /// 加載tracepoint
 ///
 pub fn load_tracepoint(ebpf: &mut aya::Ebpf) -> anyhow::Result<()> {
-    let tracepoints = vec![
+    for tracepoint in network_tracepoints() {
+        tracepoint.load_tracepoint(ebpf)?;
+    }
+    Ok(())
+}
+
+fn network_tracepoints() -> Vec<TracePointConfig> {
+    vec![
         TracePointConfig::create_syscalls("sys_enter_connect", "sys_enter_connect"),
         TracePointConfig::create_syscalls("sys_exit_connect", "sys_exit_connect"),
         TracePointConfig::create_syscalls("sys_enter_socket", "sys_enter_socket"),
@@ -56,10 +63,22 @@ pub fn load_tracepoint(ebpf: &mut aya::Ebpf) -> anyhow::Result<()> {
         TracePointConfig::create_tcp("tcp_send_reset", "tcp_send_reset"),
         TracePointConfig::create_tcp("tcp_receive_reset", "tcp_receive_reset"),
         TracePointConfig::create_tcp("tcp_retransmit_skb", "tcp_retransmit_skb"),
-    ];
+        TracePointConfig::create_tcp("tcp_probe", "tcp_probe"),
+    ]
+}
 
-    for ele in tracepoints {
-        ele.load_tracepoint(ebpf)?;
+#[cfg(test)]
+mod tests {
+    use super::network_tracepoints;
+
+    #[test]
+    fn includes_tcp_probe_payload_arrival_tracepoint() {
+        let tracepoints = network_tracepoints();
+
+        assert!(tracepoints.iter().any(|tracepoint| {
+            tracepoint.uname() == "tcp_probe"
+                && tracepoint.category() == "tcp"
+                && tracepoint.kname() == "tcp_probe"
+        }));
     }
-    Ok(())
 }
