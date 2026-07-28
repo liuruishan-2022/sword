@@ -5,7 +5,7 @@ use log::{info, warn};
 use sword_common::SCHED_SWITCH_TARGET_TIDS_MAX_ENTRIES;
 use tokio::time::sleep;
 
-use crate::loader::TracePointConfig;
+use crate::loader::{LoaderOptions, TracePointConfig};
 
 const SCHED_SWITCH_TARGET_TIDS_MAP: &str = "SCHED_SWITCH_TARGET_TIDS";
 const SCHED_SWITCH_TARGET_TGID_ENV: &str = "SWORD_SCHED_SWITCH_PID";
@@ -29,8 +29,9 @@ impl SchedSwitchTarget {
 
 fn configure_sched_switch_target_tids(
     ebpf: &mut aya::Ebpf,
+    options: &LoaderOptions,
 ) -> anyhow::Result<Option<(String, usize)>> {
-    let Some(target) = read_sched_switch_target()? else {
+    let Some(target) = read_sched_switch_target(options)? else {
         return Ok(None);
     };
 
@@ -49,7 +50,11 @@ fn configure_sched_switch_target_tids(
     Ok(Some((target.description(), tids.len())))
 }
 
-fn read_sched_switch_target() -> anyhow::Result<Option<SchedSwitchTarget>> {
+fn read_sched_switch_target(options: &LoaderOptions) -> anyhow::Result<Option<SchedSwitchTarget>> {
+    if let Some(target_pid) = options.target_pid {
+        return Ok(Some(SchedSwitchTarget::Pid(target_pid)));
+    }
+
     let target_tgid = match env::var(SCHED_SWITCH_TARGET_TGID_ENV) {
         Ok(pid) => parse_sched_switch_target_tgid(&pid)?,
         Err(env::VarError::NotPresent) => None,
@@ -240,8 +245,8 @@ fn remove_known_tids(tids_map: &mut AyaHashMap<MapData, u32, u8>, known_tids: &m
     }
 }
 
-pub fn load_sched_switch(ebpf: &mut aya::Ebpf) -> anyhow::Result<()> {
-    let target = configure_sched_switch_target_tids(ebpf)?;
+pub fn load_sched_switch(ebpf: &mut aya::Ebpf, options: &LoaderOptions) -> anyhow::Result<()> {
+    let target = configure_sched_switch_target_tids(ebpf, options)?;
     if let Some((target, tid_count)) = target {
         info!(
             "attached sched:sched_switch with target {}; loaded {} tids",
@@ -253,15 +258,16 @@ pub fn load_sched_switch(ebpf: &mut aya::Ebpf) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub fn load_sched(ebpf: &mut aya::Ebpf) -> anyhow::Result<()> {
-    let trace_points = vec![TracePointConfig::create_sched(
-        "sched_switch",
-        "sched_switch",
-    )];
+pub fn load_sched(ebpf: &mut aya::Ebpf, options: &LoaderOptions) -> anyhow::Result<()> {
+    let trace_points = vec![
+        TracePointConfig::create_sched("sched_switch", "sched_switch"),
+        TracePointConfig::create_sched("sched_wakeup", "sched_wakeup"),
+        TracePointConfig::create_sched("sched_wakeup_new", "sched_wakeup_new"),
+    ];
     for ele in trace_points {
         ele.load_tracepoint(ebpf)?;
     }
-    load_sched_switch(ebpf)?;
+    load_sched_switch(ebpf, options)?;
     Ok(())
 }
 

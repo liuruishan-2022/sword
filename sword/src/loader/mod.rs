@@ -1,8 +1,10 @@
 use aya::{
     Ebpf,
+    maps::Array,
     programs::{KProbe, TracePoint},
 };
 use log::info;
+use sword_common::RiskTargetConfig;
 
 pub mod cpu;
 pub mod io;
@@ -99,8 +101,8 @@ impl LoaderOptions {
 /// 4. network
 /// 5. block
 ///
-fn load_tracepoint(ebpf: &mut aya::Ebpf) -> anyhow::Result<()> {
-    cpu::load_sched(ebpf)?;
+fn load_tracepoint(ebpf: &mut aya::Ebpf, options: &LoaderOptions) -> anyhow::Result<()> {
+    cpu::load_sched(ebpf, options)?;
     io::load_io(ebpf)?;
     network::load_tracepoint(ebpf)?;
     Ok(())
@@ -115,8 +117,35 @@ fn load_kprobe(ebpf: &mut aya::Ebpf, options: &LoaderOptions) -> anyhow::Result<
 /// 加载ebpf的信息模块
 ///
 pub fn load_ebpf(ebpf: &mut aya::Ebpf, options: &LoaderOptions) -> anyhow::Result<()> {
-    load_tracepoint(ebpf)?;
+    configure_risk_target(ebpf, options)?;
+    load_tracepoint(ebpf, options)?;
     load_kprobe(ebpf, options)?;
+    Ok(())
+}
+
+fn configure_risk_target(ebpf: &mut aya::Ebpf, options: &LoaderOptions) -> anyhow::Result<()> {
+    let Some(tgid) = options.target_pid else {
+        return Ok(());
+    };
+
+    let map = ebpf
+        .map_mut("RISK_TARGET_CONFIG")
+        .ok_or_else(|| anyhow::anyhow!("map RISK_TARGET_CONFIG not found"))?;
+    let mut config_map = Array::<_, RiskTargetConfig>::try_from(map)?;
+    config_map.set(
+        0,
+        RiskTargetConfig {
+            tgid,
+            server_port: options.server_port,
+            _pad: 0,
+            slow_threshold_ns: options.slow_threshold_ms * 1_000_000,
+        },
+        0,
+    )?;
+    info!(
+        "configured risk tracing target pid={} server_port={} slow_threshold_ms={}",
+        tgid, options.server_port, options.slow_threshold_ms
+    );
     Ok(())
 }
 

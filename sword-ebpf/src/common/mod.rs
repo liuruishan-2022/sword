@@ -1,4 +1,17 @@
-use aya_ebpf::helpers::{bpf_get_current_pid_tgid, generated::bpf_get_current_cgroup_id};
+use aya_ebpf::{
+    helpers::{bpf_get_current_pid_tgid, generated::bpf_get_current_cgroup_id},
+    macros::map,
+    maps::Array,
+};
+use sword_common::{RISK_TARGET_CONFIG_MAX_ENTRIES, RiskTargetConfig};
+
+#[map]
+pub static RISK_TARGET_CONFIG: Array<RiskTargetConfig> =
+    Array::with_max_entries(RISK_TARGET_CONFIG_MAX_ENTRIES, 0);
+
+pub fn risk_target_config() -> Option<&'static RiskTargetConfig> {
+    RISK_TARGET_CONFIG.get(0)
+}
 
 ///
 /// 增加一些工具性质的东西,可以很方便的获取一些数据或者是信息

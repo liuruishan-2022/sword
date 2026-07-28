@@ -24,6 +24,7 @@ const SCHED_SWITCH_TOTAL_MAP: &str = "SCHED_SWITCH_TOTAL";
 const THREAD_SWITCH_OUT_TOTAL_MAP: &str = "THREAD_SWITCH_OUT_TOTAL";
 const THREAD_OFFCPU_TOTAL_NS_MAP: &str = "THREAD_OFFCPU_TOTAL_NS";
 const THREAD_COMM_MAP: &str = "THREAD_COMM";
+const RUNQUEUE_METRICS_MAP: &str = "RUNQUEUE_METRICS";
 const SYS_ENTER_OPEN_COUNTER_MAP: &str = "SYS_ENTER_OPEN_COUNTER";
 const SYS_ENTER_CONNECT: &str = "SYS_ENTER_CONNECT";
 const SYS_ENTER_STATISTICS: &str = "SYS_ENTER_STATISTICS";
@@ -57,6 +58,11 @@ pub async fn spawn_prometheus_exporter(ebpf: &mut aya::Ebpf) -> anyhow::Result<(
     let thread_comm_map: HashMap<MapData, u32, ThreadComm> = HashMap::try_from(map)?;
 
     let map = ebpf
+        .take_map(RUNQUEUE_METRICS_MAP)
+        .ok_or_else(|| anyhow::anyhow!("map {RUNQUEUE_METRICS_MAP} not found"))?;
+    let runqueue_metrics_map: PerCpuArray<MapData, u64> = PerCpuArray::try_from(map)?;
+
+    let map = ebpf
         .take_map(SYS_ENTER_CONNECT)
         .ok_or_else(|| anyhow::anyhow!("map {SYS_ENTER_CONNECT} not found"))?;
     let sys_enter_connect_map: PerCpuHashMap<MapData, u32, u64> = PerCpuHashMap::try_from(map)?;
@@ -73,6 +79,7 @@ pub async fn spawn_prometheus_exporter(ebpf: &mut aya::Ebpf) -> anyhow::Result<(
         thread_switch_out_total_map,
         thread_offcpu_total_ns_map,
         thread_comm_map,
+        runqueue_metrics_map,
     );
     let network_state = NetworkCollector::new(sys_enter_connect_map, sys_enter_statistics_map);
     let exporter_state = Arc::new(Mutex::new(MetricsState {
