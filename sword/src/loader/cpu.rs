@@ -9,7 +9,6 @@ use crate::loader::{LoaderOptions, TracePointConfig};
 
 const SCHED_SWITCH_TARGET_TIDS_MAP: &str = "SCHED_SWITCH_TARGET_TIDS";
 const RISK_TARGET_TGIDS_MAP: &str = "RISK_TARGET_TGIDS";
-const SCHED_SWITCH_TARGET_TGID_ENV: &str = "SWORD_SCHED_SWITCH_PID";
 const SCHED_SWITCH_TARGET_TID_PRESENT: u8 = 1;
 const RISK_TARGET_TGID_PRESENT: u8 = 1;
 
@@ -86,18 +85,6 @@ fn read_sched_switch_target(options: &LoaderOptions) -> Option<SchedSwitchTarget
         .target_comm
         .as_ref()
         .map(|comm| SchedSwitchTarget::Comm(comm.clone()))
-}
-
-fn parse_sched_switch_target_tgid(value: &str) -> anyhow::Result<Option<u32>> {
-    let value = value.trim();
-    if value.is_empty() {
-        return Ok(None);
-    }
-
-    value
-        .parse::<u32>()
-        .map(Some)
-        .map_err(|err| anyhow::anyhow!("invalid {SCHED_SWITCH_TARGET_TGID_ENV}: {err}"))
 }
 
 fn collect_thread_ids(target_tgid: u32) -> anyhow::Result<Vec<u32>> {
@@ -315,28 +302,7 @@ pub fn load_sched(ebpf: &mut aya::Ebpf, options: &LoaderOptions) -> anyhow::Resu
 
 #[cfg(test)]
 mod tests {
-    use super::{SchedSwitchTarget, cmdline_matches, parse_sched_switch_target_tgid};
-
-    #[test]
-    fn parse_sched_switch_target_tgid_ignores_empty_values() {
-        assert_eq!(parse_sched_switch_target_tgid("").unwrap(), None);
-        assert_eq!(parse_sched_switch_target_tgid("   ").unwrap(), None);
-    }
-
-    #[test]
-    fn parse_sched_switch_target_tgid_accepts_pid() {
-        assert_eq!(parse_sched_switch_target_tgid("1234").unwrap(), Some(1234));
-        assert_eq!(
-            parse_sched_switch_target_tgid(" 1234 ").unwrap(),
-            Some(1234)
-        );
-    }
-
-    #[test]
-    fn parse_sched_switch_target_tgid_rejects_invalid_pid() {
-        let err = parse_sched_switch_target_tgid("abc").unwrap_err();
-        assert!(err.to_string().contains("invalid SWORD_SCHED_SWITCH_PID"));
-    }
+    use super::{SchedSwitchTarget, cmdline_matches};
 
     #[test]
     fn matches_target_jar_in_nul_separated_cmdline() {

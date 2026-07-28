@@ -24,6 +24,7 @@ impl LoaderOptions {
         Self::parse_with_env(std::env::args().skip(1), |name| std::env::var(name))
     }
 
+    #[cfg(test)]
     fn parse<I, S>(args: I) -> anyhow::Result<Self>
     where
         I: IntoIterator<Item = S>,
@@ -399,6 +400,13 @@ mod tests {
             LoaderOptions::parse_with_env(
                 std::iter::empty::<&str>(),
                 env_reader(&[("SWORD_SLOW_THRESHOLD_MS", "0")]),
+            )
+            .is_err()
+        );
+        assert!(
+            LoaderOptions::parse_with_env(
+                std::iter::empty::<&str>(),
+                env_reader(&[("SWORD_SCHED_SWITCH_PID", "abc")]),
             )
             .is_err()
         );
