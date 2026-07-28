@@ -163,9 +163,6 @@ mod tests {
     #[test]
     fn slow_tcp_event_keeps_abi_size_and_has_distinct_phases() {
         assert_eq!(size_of::<SlowTcpEvent>(), 40);
-        assert_ne!(
-            SLOW_TCP_PHASE_READ_TO_WRITE,
-            SLOW_TCP_PHASE_ARRIVAL_TO_READ
-        );
+        assert_ne!(SLOW_TCP_PHASE_READ_TO_WRITE, SLOW_TCP_PHASE_ARRIVAL_TO_READ);
     }
 }

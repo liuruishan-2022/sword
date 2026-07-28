@@ -60,8 +60,7 @@ pub static TCP_PAYLOAD_ARRIVAL: LruHashMap<TcpFlowKey, u64> =
     LruHashMap::with_max_entries(32768, 0);
 
 #[map]
-pub static TCP_ACTIVE_FLOWS: LruHashMap<TcpFlowKey, u8> =
-    LruHashMap::with_max_entries(32768, 0);
+pub static TCP_ACTIVE_FLOWS: LruHashMap<TcpFlowKey, u8> = LruHashMap::with_max_entries(32768, 0);
 
 #[map]
 pub static SLOW_TCP_EVENTS: RingBuf = RingBuf::with_byte_size(256 * 1024, 0);
@@ -126,12 +125,7 @@ fn try_tcp_sendmsg(ctx: ProbeContext) -> Result<u32, u32> {
     }
 
     increment_risk_tcp_counter(RISK_TCP_SLOW_INDEX);
-    output_slow_tcp_event(
-        &tuple,
-        now_ns,
-        latency_ns,
-        SLOW_TCP_PHASE_READ_TO_WRITE,
-    );
+    output_slow_tcp_event(&tuple, now_ns, latency_ns, SLOW_TCP_PHASE_READ_TO_WRITE);
 
     Ok(0)
 }
@@ -170,12 +164,7 @@ impl TcpSocketTuple {
     }
 }
 
-fn output_slow_tcp_event(
-    tuple: &TcpSocketTuple,
-    timestamp_ns: u64,
-    latency_ns: u64,
-    phase: u8,
-) {
+fn output_slow_tcp_event(tuple: &TcpSocketTuple, timestamp_ns: u64, latency_ns: u64, phase: u8) {
     let event = SlowTcpEvent {
         timestamp_ns,
         latency_ns,
@@ -560,12 +549,7 @@ fn try_tcp_recvmsg_ret(ctx: RetProbeContext) -> Result<u32, i64> {
     };
     if latency_ns >= config.slow_threshold_ns {
         increment_risk_tcp_counter(RISK_TCP_ARRIVAL_TO_READ_SLOW_INDEX);
-        output_slow_tcp_event(
-            &tuple,
-            now_ns,
-            latency_ns,
-            SLOW_TCP_PHASE_ARRIVAL_TO_READ,
-        );
+        output_slow_tcp_event(&tuple, now_ns, latency_ns, SLOW_TCP_PHASE_ARRIVAL_TO_READ);
     }
     Ok(0)
 }

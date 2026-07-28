@@ -48,10 +48,19 @@ sudo RUST_LOG=info ./target/release/sword \
 ```
 
 - `--target-pid` is the target process TGID in the node PID namespace, not a container-local PID.
-- The server port defaults to `8080`; the slow read-to-write threshold defaults to `100ms`.
+- The server port defaults to `8080`; both slow-phase thresholds default to `100ms`.
 - Prometheus metrics are available at `http://0.0.0.0:9898/metrics`.
-- A WARN event is emitted only when the target process takes at least the configured threshold
-  between a successful TCP read and its first TCP write.
+- WARN events distinguish two phases:
+  - `target tcp arrival-to-read slow`: TCP payload reached the target server flow, but the target
+    process did not complete its first successful `tcp_recvmsg` within the threshold.
+  - `target tcp read-to-write slow`: the target process completed its first TCP read, but did not
+    start its first TCP write within the threshold.
+- Arrival-to-read tracing currently reads the Linux 5.14 `tcp:tcp_probe` tracepoint layout. Deploy
+  it only on nodes where that tracepoint is present and has the expected field offsets.
+- The additional Prometheus metrics are:
+  - `sword_target_tcp_payload_arrival_total`
+  - `sword_target_tcp_arrival_to_read_total`
+  - `sword_target_tcp_arrival_to_read_slow_total`
 - The tracer records only timing, PID/TID, IP addresses and ports. It does not read HTTP headers,
   bodies, request IDs, phone numbers or message content.
 - Use this mode for a short 5–15 minute diagnostic window and compare TPS, p99 and node CPU against
