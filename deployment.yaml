@@ -42,7 +42,7 @@ spec:
       serviceAccountName: sword-ebpf
       containers:
       - name: sword
-        image: xwharbor.wxchina.com/cpaas/component/sword:v0.1.0-039b532a49
+        image: xwharbor.wxchina.com/cpaas/component/sword:v0.1.0-49abc375d3
         imagePullPolicy: IfNotPresent
         securityContext:
           privileged: true
