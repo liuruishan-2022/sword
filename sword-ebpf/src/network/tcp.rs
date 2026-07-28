@@ -16,7 +16,7 @@ use aya_ebpf::{
         generated::bpf_ktime_get_ns,
     },
     macros::{kprobe, map, tracepoint},
-    maps::{Array, HashMap, PerCpuHashMap},
+    maps::{Array, HashMap, PerCpuArray, PerCpuHashMap},
     programs::{ProbeContext, TracePointContext},
 };
 use aya_log_ebpf::info;
@@ -24,6 +24,9 @@ use sword_common::{SysEnterType, TargetPid};
 
 const AF_INET: u16 = 2;
 const AF_INET6: u16 = 10;
+const RISK_TCP_RETRANSMIT_INDEX: u32 = 0;
+const RISK_TCP_RECEIVE_RESET_INDEX: u32 = 1;
+const RISK_TCP_SEND_RESET_INDEX: u32 = 2;
 
 #[map]
 pub static TARGET_PID: Array<TargetPid> = Array::with_max_entries(1, 0);
@@ -33,6 +36,9 @@ pub static SYS_ENTER_CONNECT: PerCpuHashMap<u32, u64> = PerCpuHashMap::with_max_
 
 #[map]
 pub static START: HashMap<u64, u64> = HashMap::with_max_entries(4096, 0);
+
+#[map]
+pub static RISK_TCP_COUNTERS: PerCpuArray<u64> = PerCpuArray::with_max_entries(7, 0);
 
 ///
 /// 这个主要是统计我们的SYS_ENTER的调用统计
@@ -590,78 +596,44 @@ pub fn tcp_send_reset(ctx: TracePointContext) -> u32 {
 }
 
 fn try_tcp_send_reset(ctx: TracePointContext) -> Result<u32, i64> {
-    let state: i32 = unsafe { ctx.read_at::<i32>(32).map_err(|err| err)? };
-    let sport: u16 = unsafe { ctx.read_at::<u16>(36).map_err(|err| err)? };
-    let dport: u16 = unsafe { ctx.read_at::<u16>(38).map_err(|err| err)? };
-    let family: u16 = unsafe { ctx.read_at::<u16>(40).map_err(|err| err)? };
-    let pid_tgid = bpf_get_current_pid_tgid();
-    let pid = (pid_tgid >> 32) as u32;
-    let tid = pid_tgid as u32;
+    count_target_tcp_event(&ctx, RISK_TCP_SEND_RESET_INDEX)
+}
 
-    if family == AF_INET {
-        let saddr: [u8; 4] = unsafe { ctx.read_at::<[u8; 4]>(42).map_err(|err| err)? };
-        let daddr: [u8; 4] = unsafe { ctx.read_at::<[u8; 4]>(46).map_err(|err| err)? };
+#[tracepoint]
+pub fn tcp_receive_reset(ctx: TracePointContext) -> u32 {
+    match count_target_tcp_event(&ctx, RISK_TCP_RECEIVE_RESET_INDEX) {
+        Ok(ret) => ret,
+        Err(err) => err as u32,
+    }
+}
 
-        info!(
-            &ctx,
-            "tcp_send_reset的信息为:pid:{} tid:{} state:{} family:{} source:{}.{}.{}.{}:{} dst:{}.{}.{}.{}:{}",
-            pid,
-            tid,
-            state,
-            family,
-            saddr[0],
-            saddr[1],
-            saddr[2],
-            saddr[3],
-            sport,
-            daddr[0],
-            daddr[1],
-            daddr[2],
-            daddr[3],
-            dport,
-        );
-    } else if family == AF_INET6 {
-        let saddr_v6: [u8; 16] = unsafe { ctx.read_at::<[u8; 16]>(50).map_err(|err| err)? };
-        let daddr_v6: [u8; 16] = unsafe { ctx.read_at::<[u8; 16]>(66).map_err(|err| err)? };
+#[tracepoint]
+pub fn tcp_retransmit_skb(ctx: TracePointContext) -> u32 {
+    match count_target_tcp_event(&ctx, RISK_TCP_RETRANSMIT_INDEX) {
+        Ok(ret) => ret,
+        Err(err) => err as u32,
+    }
+}
 
-        info!(
-            &ctx,
-            "tcp_send_reset的信息为:pid:{} tid:{} state:{} family:{} source:{:x}:{:x}:{:x}:{:x}:{:x}:{:x}:{:x}:{:x}:{} dst:{:x}:{:x}:{:x}:{:x}:{:x}:{:x}:{:x}:{:x}:{}",
-            pid,
-            tid,
-            state,
-            family,
-            u16::from_be_bytes([saddr_v6[0], saddr_v6[1]]),
-            u16::from_be_bytes([saddr_v6[2], saddr_v6[3]]),
-            u16::from_be_bytes([saddr_v6[4], saddr_v6[5]]),
-            u16::from_be_bytes([saddr_v6[6], saddr_v6[7]]),
-            u16::from_be_bytes([saddr_v6[8], saddr_v6[9]]),
-            u16::from_be_bytes([saddr_v6[10], saddr_v6[11]]),
-            u16::from_be_bytes([saddr_v6[12], saddr_v6[13]]),
-            u16::from_be_bytes([saddr_v6[14], saddr_v6[15]]),
-            sport,
-            u16::from_be_bytes([daddr_v6[0], daddr_v6[1]]),
-            u16::from_be_bytes([daddr_v6[2], daddr_v6[3]]),
-            u16::from_be_bytes([daddr_v6[4], daddr_v6[5]]),
-            u16::from_be_bytes([daddr_v6[6], daddr_v6[7]]),
-            u16::from_be_bytes([daddr_v6[8], daddr_v6[9]]),
-            u16::from_be_bytes([daddr_v6[10], daddr_v6[11]]),
-            u16::from_be_bytes([daddr_v6[12], daddr_v6[13]]),
-            u16::from_be_bytes([daddr_v6[14], daddr_v6[15]]),
-            dport,
-        );
-    } else {
-        info!(
-            &ctx,
-            "tcp_send_reset的信息为:pid:{} tid:{} state:{} family:{} sport:{} dport:{}",
-            pid,
-            tid,
-            state,
-            family,
-            sport,
-            dport,
-        );
+fn count_target_tcp_event(ctx: &TracePointContext, counter_index: u32) -> Result<u32, i64> {
+    const TCP_EVENT_LOCAL_PORT_OFFSET: usize = 36;
+
+    let Some(config) = crate::common::risk_target_config() else {
+        return Ok(0);
+    };
+    let source_port: u16 = unsafe { ctx.read_at(TCP_EVENT_LOCAL_PORT_OFFSET)? };
+    if source_port != config.server_port {
+        return Ok(0);
     }
 
+    increment_risk_tcp_counter(counter_index);
     Ok(0)
+}
+
+fn increment_risk_tcp_counter(counter_index: u32) {
+    unsafe {
+        if let Some(counter) = RISK_TCP_COUNTERS.get_ptr_mut(counter_index) {
+            *counter = (*counter).wrapping_add(1);
+        }
+    }
 }

@@ -28,6 +28,7 @@ const RUNQUEUE_METRICS_MAP: &str = "RUNQUEUE_METRICS";
 const SYS_ENTER_OPEN_COUNTER_MAP: &str = "SYS_ENTER_OPEN_COUNTER";
 const SYS_ENTER_CONNECT: &str = "SYS_ENTER_CONNECT";
 const SYS_ENTER_STATISTICS: &str = "SYS_ENTER_STATISTICS";
+const RISK_TCP_COUNTERS_MAP: &str = "RISK_TCP_COUNTERS";
 
 pub async fn spawn_prometheus_exporter(ebpf: &mut aya::Ebpf) -> anyhow::Result<()> {
     let map = ebpf
@@ -73,6 +74,11 @@ pub async fn spawn_prometheus_exporter(ebpf: &mut aya::Ebpf) -> anyhow::Result<(
     let sys_enter_statistics_map: PerCpuHashMap<MapData, SysEnterType, u64> =
         PerCpuHashMap::try_from(map)?;
 
+    let map = ebpf
+        .take_map(RISK_TCP_COUNTERS_MAP)
+        .ok_or_else(|| anyhow::anyhow!("map {RISK_TCP_COUNTERS_MAP} not found"))?;
+    let risk_tcp_counters_map: PerCpuArray<MapData, u64> = PerCpuArray::try_from(map)?;
+
     let cpu_state = CpuCollector::new(
         sched_switch_total_map,
         sys_enter_open_counter_map,
@@ -81,7 +87,11 @@ pub async fn spawn_prometheus_exporter(ebpf: &mut aya::Ebpf) -> anyhow::Result<(
         thread_comm_map,
         runqueue_metrics_map,
     );
-    let network_state = NetworkCollector::new(sys_enter_connect_map, sys_enter_statistics_map);
+    let network_state = NetworkCollector::new(
+        sys_enter_connect_map,
+        sys_enter_statistics_map,
+        risk_tcp_counters_map,
+    );
     let exporter_state = Arc::new(Mutex::new(MetricsState {
         cpu: cpu_state,
         network: network_state,
