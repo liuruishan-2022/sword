@@ -9,6 +9,7 @@ pub const SLOW_TCP_PHASE_READ_TO_WRITE: u8 = 1;
 pub const SLOW_TCP_PHASE_ARRIVAL_TO_READ: u8 = 2;
 pub const SLOW_TCP_PHASE_ARRIVAL_TO_WRITE: u8 = 3;
 pub const HTTP_REQUEST_ID_MAX_LEN: usize = 64;
+pub const HTTP_REQUEST_HEAD_MAX_LEN: usize = 512;
 
 const HTTP_REQUEST_ID_PREFIX: &[u8; 13] = b"\"requestId\":\"";
 
@@ -106,6 +107,42 @@ impl HttpRequestIdState {
 }
 
 #[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct HttpRequestHeadEvent {
+    pub socket_key: u64,
+    pub first_payload_len: u16,
+    pub second_payload_len: u16,
+    pub _pad: [u8; 4],
+    pub first_bytes: [u8; HTTP_REQUEST_HEAD_MAX_LEN],
+    pub second_bytes: [u8; HTTP_REQUEST_HEAD_MAX_LEN],
+}
+
+impl Default for HttpRequestHeadEvent {
+    fn default() -> Self {
+        Self {
+            socket_key: 0,
+            first_payload_len: 0,
+            second_payload_len: 0,
+            _pad: [0; 4],
+            first_bytes: [0; HTTP_REQUEST_HEAD_MAX_LEN],
+            second_bytes: [0; HTTP_REQUEST_HEAD_MAX_LEN],
+        }
+    }
+}
+
+impl HttpRequestHeadEvent {
+    pub fn first_payload(&self) -> &[u8] {
+        let payload_len = (self.first_payload_len as usize).min(HTTP_REQUEST_HEAD_MAX_LEN);
+        &self.first_bytes[..payload_len]
+    }
+
+    pub fn second_payload(&self) -> &[u8] {
+        let payload_len = (self.second_payload_len as usize).min(HTTP_REQUEST_HEAD_MAX_LEN);
+        &self.second_bytes[..payload_len]
+    }
+}
+
+#[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct RequestTimings {
     pub arrival_to_read_ns: u64,
@@ -179,6 +216,7 @@ pub struct SlowTcpEvent {
     pub latency_ns: u64,
     pub arrival_to_read_ns: u64,
     pub read_to_write_ns: u64,
+    pub socket_key: u64,
     pub tgid: u32,
     pub tid: u32,
     pub source_addr_v4: u32,
@@ -255,7 +293,7 @@ mod tests {
     use core::mem::size_of;
 
     use super::{
-        HttpRequestIdState, RequestTimings, SLOW_TCP_PHASE_ARRIVAL_TO_READ,
+        HttpRequestHeadEvent, HttpRequestIdState, RequestTimings, SLOW_TCP_PHASE_ARRIVAL_TO_READ,
         SLOW_TCP_PHASE_ARRIVAL_TO_WRITE, SLOW_TCP_PHASE_READ_TO_WRITE, SlowTcpEvent, TcpFlowKey,
     };
 
@@ -281,7 +319,8 @@ mod tests {
 
     #[test]
     fn slow_tcp_event_keeps_abi_size_and_has_distinct_phases() {
-        assert_eq!(size_of::<SlowTcpEvent>(), 128);
+        assert_eq!(size_of::<SlowTcpEvent>(), 136);
+        assert_eq!(size_of::<HttpRequestHeadEvent>(), 1040);
         assert_ne!(SLOW_TCP_PHASE_READ_TO_WRITE, SLOW_TCP_PHASE_ARRIVAL_TO_READ);
         assert_ne!(
             SLOW_TCP_PHASE_ARRIVAL_TO_READ,

@@ -16,7 +16,10 @@ use tokio::net::TcpListener;
 use tokio::sync::Mutex;
 
 use crate::metrics::cpu::CpuCollector;
-use crate::metrics::network::{NetworkCollector, decode_slow_tcp_event, format_slow_tcp_event};
+use crate::metrics::network::{
+    NetworkCollector, SlowTcpEventCorrelator, decode_http_request_head_event,
+    decode_slow_tcp_event, format_slow_tcp_event,
+};
 
 pub mod cpu;
 pub mod network;
@@ -124,6 +127,7 @@ pub async fn spawn_prometheus_exporter(ebpf: &mut aya::Ebpf) -> anyhow::Result<(
 fn spawn_slow_tcp_event_reader(ring_buf: RingBuf<MapData>) -> anyhow::Result<()> {
     let mut ring_buf = AsyncFd::new(ring_buf)?;
     tokio::spawn(async move {
+        let mut correlator = SlowTcpEventCorrelator::default();
         loop {
             let mut guard = match ring_buf.readable_mut().await {
                 Ok(guard) => guard,
@@ -133,8 +137,15 @@ fn spawn_slow_tcp_event_reader(ring_buf: RingBuf<MapData>) -> anyhow::Result<()>
                 }
             };
             while let Some(item) = guard.get_inner_mut().next() {
+                if let Some(request) = decode_http_request_head_event(&item) {
+                    correlator.record_request(request);
+                    continue;
+                }
                 match decode_slow_tcp_event(&item) {
-                    Some(event) => warn!("{}", format_slow_tcp_event(&event)),
+                    Some(mut event) => {
+                        correlator.enrich(&mut event);
+                        warn!("{}", format_slow_tcp_event(&event));
+                    }
                     None => warn!("discarded malformed slow TCP event size={}", item.len()),
                 }
             }

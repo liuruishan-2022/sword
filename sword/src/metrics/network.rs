@@ -1,4 +1,4 @@
-use std::{mem::size_of, net::Ipv4Addr, ptr, sync::atomic::AtomicU64};
+use std::{collections::HashMap, mem::size_of, net::Ipv4Addr, ptr, sync::atomic::AtomicU64};
 
 use aya::maps::{MapData, MapError, PerCpuArray, PerCpuHashMap};
 use prometheus_client::encoding::{EncodeLabelSet, text::encode};
@@ -6,7 +6,8 @@ use prometheus_client::metrics::family::Family;
 use prometheus_client::metrics::gauge::Gauge;
 use prometheus_client::registry::Registry;
 use sword_common::{
-    SLOW_TCP_PHASE_ARRIVAL_TO_READ, SLOW_TCP_PHASE_ARRIVAL_TO_WRITE, SlowTcpEvent, SysEnterType,
+    HttpRequestHeadEvent, HttpRequestId, HttpRequestIdState, SLOW_TCP_PHASE_ARRIVAL_TO_READ,
+    SLOW_TCP_PHASE_ARRIVAL_TO_WRITE, SlowTcpEvent, SysEnterType,
 };
 
 ///
@@ -275,6 +276,39 @@ pub(crate) fn decode_slow_tcp_event(bytes: &[u8]) -> Option<SlowTcpEvent> {
     Some(unsafe { ptr::read_unaligned(bytes.as_ptr().cast::<SlowTcpEvent>()) })
 }
 
+pub(crate) fn decode_http_request_head_event(bytes: &[u8]) -> Option<HttpRequestHeadEvent> {
+    if bytes.len() != size_of::<HttpRequestHeadEvent>() {
+        return None;
+    }
+    Some(unsafe { ptr::read_unaligned(bytes.as_ptr().cast::<HttpRequestHeadEvent>()) })
+}
+
+#[derive(Default)]
+pub(crate) struct SlowTcpEventCorrelator {
+    request_ids: HashMap<u64, HttpRequestId>,
+}
+
+impl SlowTcpEventCorrelator {
+    pub(crate) fn record_request(&mut self, request: HttpRequestHeadEvent) {
+        let mut request_id = HttpRequestIdState::default();
+        request_id.consume(request.first_payload());
+        request_id.consume(request.second_payload());
+        if request_id.is_complete() {
+            self.request_ids
+                .insert(request.socket_key, request_id.request_id());
+        }
+    }
+
+    pub(crate) fn enrich(&mut self, event: &mut SlowTcpEvent) {
+        if event.phase != SLOW_TCP_PHASE_ARRIVAL_TO_WRITE || event.socket_key == 0 {
+            return;
+        }
+        if let Some(request_id) = self.request_ids.remove(&event.socket_key) {
+            event.request_id = request_id;
+        }
+    }
+}
+
 pub(crate) fn format_slow_tcp_event(event: &SlowTcpEvent) -> String {
     if event.phase == SLOW_TCP_PHASE_ARRIVAL_TO_WRITE {
         let request_id = std::str::from_utf8(event.request_id.as_bytes()).unwrap_or("<invalid>");
@@ -317,11 +351,13 @@ mod tests {
     use std::{mem::size_of, slice};
 
     use sword_common::{
-        HttpRequestIdState, SLOW_TCP_PHASE_ARRIVAL_TO_READ, SLOW_TCP_PHASE_ARRIVAL_TO_WRITE,
-        SLOW_TCP_PHASE_READ_TO_WRITE, SlowTcpEvent,
+        HttpRequestHeadEvent, HttpRequestIdState, SLOW_TCP_PHASE_ARRIVAL_TO_READ,
+        SLOW_TCP_PHASE_ARRIVAL_TO_WRITE, SLOW_TCP_PHASE_READ_TO_WRITE, SlowTcpEvent,
     };
 
-    use super::{NetworkMetrics, decode_slow_tcp_event, format_slow_tcp_event};
+    use super::{
+        NetworkMetrics, SlowTcpEventCorrelator, decode_slow_tcp_event, format_slow_tcp_event,
+    };
 
     #[test]
     fn exports_target_tcp_transport_metrics() {
@@ -351,6 +387,7 @@ mod tests {
             latency_ns: 123_000_000,
             arrival_to_read_ns: 0,
             read_to_write_ns: 0,
+            socket_key: 0,
             tgid: 42,
             tid: 43,
             source_addr_v4: u32::from_be_bytes([172, 16, 15, 139]),
@@ -386,6 +423,7 @@ mod tests {
             latency_ns: 456_000_000,
             arrival_to_read_ns: 0,
             read_to_write_ns: 0,
+            socket_key: 0,
             tgid: 42,
             tid: 43,
             source_addr_v4: u32::from_be_bytes([172, 16, 15, 139]),
@@ -413,6 +451,7 @@ mod tests {
             latency_ns: 650_000_000,
             arrival_to_read_ns: 50_000_000,
             read_to_write_ns: 600_000_000,
+            socket_key: 99,
             tgid: 42,
             tid: 43,
             source_addr_v4: u32::from_be_bytes([172, 16, 15, 139]),
@@ -432,5 +471,34 @@ mod tests {
         assert!(line.contains("arrival_to_read_ms=50.000"));
         assert!(line.contains("read_to_write_ms=600.000"));
         assert!(line.contains("arrival_to_write_ms=650.000"));
+    }
+
+    #[test]
+    fn correlates_request_id_in_user_space_before_formatting_slow_event() {
+        let first_payload = br#"POST /evaluate HTTP/1.1
+Content-Type: application/json
+
+{"reque"#;
+        let second_payload = br#"stId":"7fbb215d-a5d1-4478-b134-fad7a388dea3","items":[]}"#;
+        let mut request = HttpRequestHeadEvent::default();
+        request.socket_key = 99;
+        request.first_payload_len = first_payload.len() as u16;
+        request.second_payload_len = second_payload.len() as u16;
+        request.first_bytes[..first_payload.len()].copy_from_slice(first_payload);
+        request.second_bytes[..second_payload.len()].copy_from_slice(second_payload);
+        let mut event = SlowTcpEvent {
+            socket_key: 99,
+            phase: SLOW_TCP_PHASE_ARRIVAL_TO_WRITE,
+            ..Default::default()
+        };
+        let mut correlator = SlowTcpEventCorrelator::default();
+
+        correlator.record_request(request);
+        correlator.enrich(&mut event);
+
+        assert_eq!(
+            event.request_id.as_bytes(),
+            b"7fbb215d-a5d1-4478-b134-fad7a388dea3"
+        );
     }
 }

@@ -20,9 +20,9 @@ use aya_ebpf::{
     programs::{ProbeContext, RetProbeContext, TracePointContext},
 };
 use sword_common::{
-    HttpRequestId, HttpRequestIdState, RequestTimings, SLOW_TCP_PHASE_ARRIVAL_TO_READ,
-    SLOW_TCP_PHASE_ARRIVAL_TO_WRITE, SLOW_TCP_PHASE_READ_TO_WRITE, SlowTcpEvent, SysEnterType,
-    TargetPid, TcpFlowKey,
+    HTTP_REQUEST_HEAD_MAX_LEN, HttpRequestHeadEvent, HttpRequestId, RequestTimings,
+    SLOW_TCP_PHASE_ARRIVAL_TO_READ, SLOW_TCP_PHASE_ARRIVAL_TO_WRITE, SLOW_TCP_PHASE_READ_TO_WRITE,
+    SlowTcpEvent, SysEnterType, TargetPid, TcpFlowKey,
 };
 
 const AF_INET: u16 = 2;
@@ -37,7 +37,6 @@ const RISK_TCP_EVENT_DROPPED_INDEX: u32 = 6;
 const RISK_TCP_PAYLOAD_ARRIVAL_INDEX: u32 = 7;
 const RISK_TCP_ARRIVAL_TO_READ_INDEX: u32 = 8;
 const RISK_TCP_ARRIVAL_TO_READ_SLOW_INDEX: u32 = 9;
-const HTTP_REQUEST_SCAN_BYTES: usize = 512;
 const HTTP_REQUEST_SLOW_THRESHOLD_NS: u64 = 500_000_000;
 const MSGHDR_MSG_ITER_OFFSET: usize = 16;
 const IOV_ITER_TYPE_OFFSET: usize = 0;
@@ -60,13 +59,6 @@ pub struct TcpRecvInflight {
 pub struct TcpRequestContext {
     arrival_ns: u64,
     read_ns: u64,
-    request_id: HttpRequestIdState,
-}
-
-#[repr(C)]
-#[derive(Clone, Copy)]
-pub struct HttpScanBuffer {
-    bytes: [u8; HTTP_REQUEST_SCAN_BYTES],
 }
 
 #[map]
@@ -85,7 +77,12 @@ pub static RISK_TCP_COUNTERS: PerCpuArray<u64> = PerCpuArray::with_max_entries(1
 pub static TCP_RECV_INFLIGHT: HashMap<u32, TcpRecvInflight> = HashMap::with_max_entries(4096, 0);
 
 #[map]
-pub static HTTP_SCAN_BUFFER: PerCpuArray<HttpScanBuffer> = PerCpuArray::with_max_entries(1, 0);
+pub static HTTP_REQUEST_HEAD_BUFFER: PerCpuArray<HttpRequestHeadEvent> =
+    PerCpuArray::with_max_entries(1, 0);
+
+#[map]
+pub static HTTP_REQUEST_HEADS: LruHashMap<u64, HttpRequestHeadEvent> =
+    LruHashMap::with_max_entries(8192, 0);
 
 #[map]
 pub static TCP_REQUEST_START: HashMap<u64, TcpRequestContext> = HashMap::with_max_entries(32768, 0);
@@ -146,6 +143,7 @@ fn try_tcp_sendmsg(ctx: ProbeContext) -> Result<u32, u32> {
 
     let socket_key = sk as u64;
     let Some(request) = (unsafe { TCP_REQUEST_START.get(&socket_key) }).copied() else {
+        let _ = HTTP_REQUEST_HEADS.remove(&socket_key);
         return Ok(0);
     };
     let _ = TCP_REQUEST_START.remove(&socket_key);
@@ -153,6 +151,7 @@ fn try_tcp_sendmsg(ctx: ProbeContext) -> Result<u32, u32> {
     let now_ns = unsafe { bpf_ktime_get_ns() };
     let read_to_write_ns = now_ns.saturating_sub(request.read_ns);
     let Some(config) = crate::common::risk_target_config() else {
+        let _ = HTTP_REQUEST_HEADS.remove(&socket_key);
         return Ok(0);
     };
     if read_to_write_ns >= config.slow_threshold_ns {
@@ -165,12 +164,14 @@ fn try_tcp_sendmsg(ctx: ProbeContext) -> Result<u32, u32> {
         );
     }
 
-    if request.arrival_ns != 0 && request.request_id.is_complete() {
+    if request.arrival_ns != 0 {
         let timings = RequestTimings::from_timestamps(request.arrival_ns, request.read_ns, now_ns);
         if timings.arrival_to_write_ns >= HTTP_REQUEST_SLOW_THRESHOLD_NS {
-            output_slow_http_event(&tuple, now_ns, timings, request.request_id.request_id());
+            output_http_request_head(socket_key);
+            output_slow_http_event(&tuple, socket_key, now_ns, timings);
         }
     }
+    let _ = HTTP_REQUEST_HEADS.remove(&socket_key);
 
     Ok(0)
 }
@@ -215,6 +216,7 @@ fn output_slow_tcp_event(tuple: &TcpSocketTuple, timestamp_ns: u64, latency_ns: 
         latency_ns,
         arrival_to_read_ns: 0,
         read_to_write_ns: 0,
+        socket_key: 0,
         tgid: tuple.pid,
         tid: tuple.tid,
         source_addr_v4: tuple.saddr_v4,
@@ -233,15 +235,16 @@ fn output_slow_tcp_event(tuple: &TcpSocketTuple, timestamp_ns: u64, latency_ns: 
 
 fn output_slow_http_event(
     tuple: &TcpSocketTuple,
+    socket_key: u64,
     timestamp_ns: u64,
     timings: RequestTimings,
-    request_id: HttpRequestId,
 ) {
     let event = SlowTcpEvent {
         timestamp_ns,
         latency_ns: timings.arrival_to_write_ns,
         arrival_to_read_ns: timings.arrival_to_read_ns,
         read_to_write_ns: timings.read_to_write_ns,
+        socket_key,
         tgid: tuple.pid,
         tid: tuple.tid,
         source_addr_v4: tuple.saddr_v4,
@@ -251,9 +254,21 @@ fn output_slow_http_event(
         family: tuple.family,
         phase: SLOW_TCP_PHASE_ARRIVAL_TO_WRITE,
         _pad: 0,
-        request_id,
+        request_id: HttpRequestId::default(),
     };
     if SLOW_TCP_EVENTS.output::<SlowTcpEvent>(&event, 0).is_err() {
+        increment_risk_tcp_counter(RISK_TCP_EVENT_DROPPED_INDEX);
+    }
+}
+
+fn output_http_request_head(socket_key: u64) {
+    let Some(request) = (unsafe { HTTP_REQUEST_HEADS.get(&socket_key) }) else {
+        return;
+    };
+    if SLOW_TCP_EVENTS
+        .output::<HttpRequestHeadEvent>(request, 0)
+        .is_err()
+    {
         increment_risk_tcp_counter(RISK_TCP_EVENT_DROPPED_INDEX);
     }
 }
@@ -638,17 +653,16 @@ fn try_tcp_recvmsg_ret(ctx: RetProbeContext) -> Result<u32, i64> {
     let existing = unsafe { TCP_REQUEST_START.get(&socket_key) }.copied();
     let first_read = existing.is_none();
     let now_ns = unsafe { bpf_ktime_get_ns() };
-    let mut request = existing.unwrap_or_else(|| {
+    let request = existing.unwrap_or_else(|| {
         let arrival_ns = unsafe { TCP_PAYLOAD_ARRIVAL.get(&flow) }
             .copied()
             .unwrap_or(0);
         TcpRequestContext {
             arrival_ns,
             read_ns: now_ns,
-            request_id: HttpRequestIdState::default(),
         }
     });
-    consume_request_id(&mut request, &inflight, bytes_read as u64);
+    capture_request_head(socket_key, &inflight, bytes_read as u64, first_read);
     if TCP_REQUEST_START.insert(&socket_key, &request, 0).is_err() {
         increment_risk_tcp_counter(RISK_TCP_EVENT_DROPPED_INDEX);
     }
@@ -678,29 +692,86 @@ fn try_tcp_recvmsg_ret(ctx: RetProbeContext) -> Result<u32, i64> {
     Ok(0)
 }
 
-fn consume_request_id(
-    request: &mut TcpRequestContext,
+fn capture_request_head(
+    socket_key: u64,
     inflight: &TcpRecvInflight,
     bytes_read: u64,
+    first_read: bool,
 ) {
-    if request.request_id.is_complete() || inflight.user_buffer == 0 || inflight.buffer_len == 0 {
-        return;
-    }
-    let scan_len = bytes_read
-        .min(inflight.buffer_len)
-        .min(HTTP_REQUEST_SCAN_BYTES as u64) as usize;
-    if scan_len == 0 {
+    if inflight.user_buffer == 0 || inflight.buffer_len == 0 {
         return;
     }
 
-    let Some(scan_buffer) = HTTP_SCAN_BUFFER.get_ptr_mut(0) else {
-        increment_risk_tcp_counter(RISK_TCP_EVENT_DROPPED_INDEX);
+    if first_read {
+        let Some(request) = HTTP_REQUEST_HEAD_BUFFER.get_ptr_mut(0) else {
+            increment_risk_tcp_counter(RISK_TCP_EVENT_DROPPED_INDEX);
+            return;
+        };
+        unsafe {
+            (*request).socket_key = socket_key;
+            (*request).first_payload_len = 0;
+            (*request).second_payload_len = 0;
+            (*request)._pad = [0; 4];
+        }
+        capture_first_request_chunk(request, inflight, bytes_read);
+        if unsafe { (*request).first_payload_len } != 0
+            && HTTP_REQUEST_HEADS
+                .insert(&socket_key, unsafe { &*request }, 0)
+                .is_err()
+        {
+            increment_risk_tcp_counter(RISK_TCP_EVENT_DROPPED_INDEX);
+        }
+        return;
+    }
+
+    let Some(request) = HTTP_REQUEST_HEADS.get_ptr_mut(&socket_key) else {
         return;
     };
-    let payload = unsafe { &mut (*scan_buffer).bytes };
-    let scan = unsafe { core::slice::from_raw_parts_mut(payload.as_mut_ptr(), scan_len) };
-    if unsafe { bpf_probe_read_user_buf(inflight.user_buffer as *const u8, scan) }.is_ok() {
-        request.request_id.consume(scan);
+    capture_second_request_chunk(request, inflight, bytes_read);
+}
+
+fn capture_first_request_chunk(
+    request: *mut HttpRequestHeadEvent,
+    inflight: &TcpRecvInflight,
+    bytes_read: u64,
+) {
+    let copy_len = bytes_read
+        .min(inflight.buffer_len)
+        .min(HTTP_REQUEST_HEAD_MAX_LEN as u64) as usize;
+    if copy_len == 0 {
+        return;
+    }
+
+    let destination = unsafe { (*request).first_bytes.as_mut_ptr() };
+    let payload = unsafe { core::slice::from_raw_parts_mut(destination, copy_len) };
+    if unsafe { bpf_probe_read_user_buf(inflight.user_buffer as *const u8, payload) }.is_ok() {
+        unsafe {
+            (*request).first_payload_len = copy_len as u16;
+        }
+    }
+}
+
+fn capture_second_request_chunk(
+    request: *mut HttpRequestHeadEvent,
+    inflight: &TcpRecvInflight,
+    bytes_read: u64,
+) {
+    if unsafe { (*request).second_payload_len } != 0 {
+        return;
+    }
+    let copy_len = bytes_read
+        .min(inflight.buffer_len)
+        .min(HTTP_REQUEST_HEAD_MAX_LEN as u64) as usize;
+    if copy_len == 0 {
+        return;
+    }
+
+    let destination = unsafe { (*request).second_bytes.as_mut_ptr() };
+    let payload = unsafe { core::slice::from_raw_parts_mut(destination, copy_len) };
+    if unsafe { bpf_probe_read_user_buf(inflight.user_buffer as *const u8, payload) }.is_ok() {
+        unsafe {
+            (*request).second_payload_len = copy_len as u16;
+        }
     }
 }
 
