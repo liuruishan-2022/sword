@@ -20,6 +20,27 @@ RUST_LOG=info cargo run --release
 Cargo build scripts are used to automatically build the eBPF correctly and include it in the
 program.
 
+## Risk ReadTimeout short-term tracing
+
+Run `sword` on the Kubernetes node that hosts the target service:
+
+```shell
+sudo RUST_LOG=info ./target/release/sword \
+  --target-pid <host-tgid> \
+  --server-port 8080 \
+  --slow-threshold-ms 100
+```
+
+- `--target-pid` is the target process TGID in the node PID namespace, not a container-local PID.
+- The server port defaults to `8080`; the slow read-to-write threshold defaults to `100ms`.
+- Prometheus metrics are available at `http://0.0.0.0:9898/metrics`.
+- A WARN event is emitted only when the target process takes at least the configured threshold
+  between a successful TCP read and its first TCP write.
+- The tracer records only timing, PID/TID, IP addresses and ports. It does not read HTTP headers,
+  bodies, request IDs, phone numbers or message content.
+- Use this mode for a short 5–15 minute diagnostic window and compare TPS, p99 and node CPU against
+  an untraced baseline.
+
 ## Cross-compiling on macOS
 
 Cross compilation should work on both Intel and Apple Silicon Macs.
