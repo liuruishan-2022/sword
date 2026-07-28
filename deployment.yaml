@@ -42,7 +42,7 @@ spec:
       serviceAccountName: sword-ebpf
       containers:
       - name: sword
-        image: xwharbor.wxchina.com/cpaas/component/sword:v0.1.0-49abc375d3
+        image: xwharbor.wxchina.com/cpaas/component/sword:v0.1.0-6b71e56e15
         imagePullPolicy: IfNotPresent
         securityContext:
           privileged: true
@@ -101,43 +101,6 @@ spec:
       - name: debugfs
         hostPath:
           path: /sys/kernel/debug
----
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: rust-mouse
-  namespace: monitoring
-  labels:
-    app: rust-mouse
-spec:
-  replicas: 2
-  selector:
-    matchLabels:
-      app: rust-mouse
-  template:
-    metadata:
-      labels:
-        app: rust-mouse
-    spec:
-      nodeSelector:
-        kops.k8s.io/ebpf: enabled
-      containers:
-      - name: rust-mouse
-        image: xwharbor.wxchina.com/cpaas/component/rust-mouse:v0.1.0-964a84e45b
-        imagePullPolicy: IfNotPresent
-        args:
-        - net-request
-        - https://www.baidu.com/
-        - "1"
-        - "1000"
-        - "5000"
-        resources:
-          limits:
-            cpu: "500m"
-            memory: "128Mi"
-          requests:
-            cpu: "100m"
-            memory: "64Mi"
 ---
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
