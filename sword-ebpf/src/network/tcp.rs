@@ -22,7 +22,7 @@ use aya_ebpf::{
 use sword_common::{
     HTTP_REQUEST_HEAD_MAX_LEN, HttpRequestHeadEvent, HttpRequestId, RequestTimings,
     SLOW_TCP_PHASE_ARRIVAL_TO_READ, SLOW_TCP_PHASE_ARRIVAL_TO_WRITE, SLOW_TCP_PHASE_READ_TO_WRITE,
-    SlowTcpEvent, SysEnterType, TargetPid, TcpFlowKey,
+    SlowTcpEvent, SysEnterType, TargetPid, TcpFlowKey, http_request_capture_lengths,
 };
 
 const AF_INET: u16 = 2;
@@ -713,7 +713,7 @@ fn capture_request_head(
             (*request).second_payload_len = 0;
             (*request)._pad = [0; 4];
         }
-        capture_first_request_chunk(request, inflight, bytes_read);
+        capture_first_request_chunks(request, inflight, bytes_read);
         if unsafe { (*request).first_payload_len } != 0
             && HTTP_REQUEST_HEADS
                 .insert(&socket_key, unsafe { &*request }, 0)
@@ -730,23 +730,33 @@ fn capture_request_head(
     capture_second_request_chunk(request, inflight, bytes_read);
 }
 
-fn capture_first_request_chunk(
+fn capture_first_request_chunks(
     request: *mut HttpRequestHeadEvent,
     inflight: &TcpRecvInflight,
     bytes_read: u64,
 ) {
-    let copy_len = bytes_read
-        .min(inflight.buffer_len)
-        .min(HTTP_REQUEST_HEAD_MAX_LEN as u64) as usize;
-    if copy_len == 0 {
+    let (first_len, second_len) = http_request_capture_lengths(bytes_read, inflight.buffer_len);
+    if first_len == 0 {
         return;
     }
 
     let destination = unsafe { (*request).first_bytes.as_mut_ptr() };
-    let payload = unsafe { core::slice::from_raw_parts_mut(destination, copy_len) };
+    let payload = unsafe { core::slice::from_raw_parts_mut(destination, first_len) };
     if unsafe { bpf_probe_read_user_buf(inflight.user_buffer as *const u8, payload) }.is_ok() {
         unsafe {
-            (*request).first_payload_len = copy_len as u16;
+            (*request).first_payload_len = first_len as u16;
+        }
+    }
+    if second_len == 0 {
+        return;
+    }
+
+    let destination = unsafe { (*request).second_bytes.as_mut_ptr() };
+    let payload = unsafe { core::slice::from_raw_parts_mut(destination, second_len) };
+    let source = inflight.user_buffer + HTTP_REQUEST_HEAD_MAX_LEN as u64;
+    if unsafe { bpf_probe_read_user_buf(source as *const u8, payload) }.is_ok() {
+        unsafe {
+            (*request).second_payload_len = second_len as u16;
         }
     }
 }

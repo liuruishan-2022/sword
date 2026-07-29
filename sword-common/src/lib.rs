@@ -11,6 +11,17 @@ pub const SLOW_TCP_PHASE_ARRIVAL_TO_WRITE: u8 = 3;
 pub const HTTP_REQUEST_ID_MAX_LEN: usize = 64;
 pub const HTTP_REQUEST_HEAD_MAX_LEN: usize = 512;
 
+pub fn http_request_capture_lengths(bytes_read: u64, buffer_len: u64) -> (usize, usize) {
+    let available = bytes_read
+        .min(buffer_len)
+        .min((HTTP_REQUEST_HEAD_MAX_LEN * 2) as u64) as usize;
+    let first_len = available.min(HTTP_REQUEST_HEAD_MAX_LEN);
+    let second_len = available
+        .saturating_sub(first_len)
+        .min(HTTP_REQUEST_HEAD_MAX_LEN);
+    (first_len, second_len)
+}
+
 const HTTP_REQUEST_ID_PREFIX: &[u8; 13] = b"\"requestId\":\"";
 
 #[repr(C)]
@@ -295,6 +306,7 @@ mod tests {
     use super::{
         HttpRequestHeadEvent, HttpRequestIdState, RequestTimings, SLOW_TCP_PHASE_ARRIVAL_TO_READ,
         SLOW_TCP_PHASE_ARRIVAL_TO_WRITE, SLOW_TCP_PHASE_READ_TO_WRITE, SlowTcpEvent, TcpFlowKey,
+        http_request_capture_lengths,
     };
 
     #[test]
@@ -341,6 +353,22 @@ Content-Type: application/json
         assert!(!state.is_complete());
 
         state.consume(br#"stId":"7fbb215d-a5d1-4478-b134-fad7a388dea3","packId":"p1"}"#);
+
+        assert!(state.is_complete());
+        assert_eq!(state.as_bytes(), b"7fbb215d-a5d1-4478-b134-fad7a388dea3");
+    }
+
+    #[test]
+    fn extracts_request_id_after_first_512_bytes_in_one_receive() {
+        let mut payload = [b'x'; 800];
+        let request_id = br#""requestId":"7fbb215d-a5d1-4478-b134-fad7a388dea3""#;
+        payload[600..600 + request_id.len()].copy_from_slice(request_id);
+
+        let (first_len, second_len) =
+            http_request_capture_lengths(payload.len() as u64, payload.len() as u64);
+        let mut state = HttpRequestIdState::default();
+        state.consume(&payload[..first_len]);
+        state.consume(&payload[first_len..first_len + second_len]);
 
         assert!(state.is_complete());
         assert_eq!(state.as_bytes(), b"7fbb215d-a5d1-4478-b134-fad7a388dea3");
