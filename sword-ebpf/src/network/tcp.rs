@@ -21,8 +21,10 @@ use aya_ebpf::{
 };
 use sword_common::{
     HTTP_REQUEST_HEAD_MAX_LEN, HttpRequestHeadEvent, HttpRequestId, RequestTimings,
-    SLOW_TCP_PHASE_ARRIVAL_TO_READ, SLOW_TCP_PHASE_ARRIVAL_TO_WRITE, SLOW_TCP_PHASE_READ_TO_WRITE,
-    SlowTcpEvent, SysEnterType, TargetPid, TcpFlowKey, http_request_capture_lengths,
+    SLOW_TCP_PHASE_ARRIVAL_TO_EPOLL, SLOW_TCP_PHASE_ARRIVAL_TO_READ,
+    SLOW_TCP_PHASE_ARRIVAL_TO_WRITE, SLOW_TCP_PHASE_EPOLL_TO_RECV, SLOW_TCP_PHASE_READ_TO_WRITE,
+    SLOW_TCP_PHASE_RECV_DURATION, SlowTcpEvent, SysEnterType, TargetPid, TcpFlowKey,
+    http_request_capture_lengths,
 };
 
 const AF_INET: u16 = 2;
@@ -37,6 +39,12 @@ const RISK_TCP_EVENT_DROPPED_INDEX: u32 = 6;
 const RISK_TCP_PAYLOAD_ARRIVAL_INDEX: u32 = 7;
 const RISK_TCP_ARRIVAL_TO_READ_INDEX: u32 = 8;
 const RISK_TCP_ARRIVAL_TO_READ_SLOW_INDEX: u32 = 9;
+const RISK_TCP_ARRIVAL_TO_EPOLL_LATENCY_NS_INDEX: u32 = 10;
+const RISK_TCP_ARRIVAL_TO_EPOLL_SLOW_INDEX: u32 = 11;
+const RISK_TCP_EPOLL_TO_RECV_LATENCY_NS_INDEX: u32 = 12;
+const RISK_TCP_EPOLL_TO_RECV_SLOW_INDEX: u32 = 13;
+const RISK_TCP_RECV_DURATION_NS_INDEX: u32 = 14;
+const RISK_TCP_RECV_DURATION_SLOW_INDEX: u32 = 15;
 const HTTP_REQUEST_SLOW_THRESHOLD_NS: u64 = 500_000_000;
 const MSGHDR_MSG_ITER_OFFSET: usize = 16;
 const IOV_ITER_TYPE_OFFSET: usize = 0;
@@ -52,12 +60,16 @@ pub struct TcpRecvInflight {
     socket_key: u64,
     user_buffer: u64,
     buffer_len: u64,
+    recv_enter_ns: u64,
+    epoll_exit_ns: u64,
 }
 
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct TcpRequestContext {
     arrival_ns: u64,
+    epoll_exit_ns: u64,
+    recv_enter_ns: u64,
     read_ns: u64,
 }
 
@@ -71,10 +83,16 @@ pub static SYS_ENTER_CONNECT: PerCpuHashMap<u32, u64> = PerCpuHashMap::with_max_
 pub static START: HashMap<u64, u64> = HashMap::with_max_entries(4096, 0);
 
 #[map]
-pub static RISK_TCP_COUNTERS: PerCpuArray<u64> = PerCpuArray::with_max_entries(10, 0);
+pub static RISK_TCP_COUNTERS: PerCpuArray<u64> = PerCpuArray::with_max_entries(16, 0);
 
 #[map]
 pub static TCP_RECV_INFLIGHT: HashMap<u32, TcpRecvInflight> = HashMap::with_max_entries(4096, 0);
+
+#[map]
+pub static EPOLL_WAIT_ENTER_NS: HashMap<u32, u64> = HashMap::with_max_entries(4096, 0);
+
+#[map]
+pub static EPOLL_EVENT_EXIT_NS: HashMap<u32, u64> = HashMap::with_max_entries(4096, 0);
 
 #[map]
 pub static HTTP_REQUEST_HEAD_BUFFER: PerCpuArray<HttpRequestHeadEvent> =
@@ -165,7 +183,13 @@ fn try_tcp_sendmsg(ctx: ProbeContext) -> Result<u32, u32> {
     }
 
     if request.arrival_ns != 0 {
-        let timings = RequestTimings::from_timestamps(request.arrival_ns, request.read_ns, now_ns);
+        let timings = RequestTimings::from_phase_timestamps(
+            request.arrival_ns,
+            request.epoll_exit_ns,
+            request.recv_enter_ns,
+            request.read_ns,
+            now_ns,
+        );
         if timings.arrival_to_write_ns >= HTTP_REQUEST_SLOW_THRESHOLD_NS {
             output_http_request_head(socket_key);
             output_slow_http_event(&tuple, socket_key, now_ns, timings);
@@ -173,6 +197,75 @@ fn try_tcp_sendmsg(ctx: ProbeContext) -> Result<u32, u32> {
     }
     let _ = HTTP_REQUEST_HEADS.remove(&socket_key);
 
+    Ok(0)
+}
+
+#[tracepoint]
+pub fn sys_enter_epoll_wait(ctx: TracePointContext) -> u32 {
+    match try_sys_enter_epoll_wait(ctx) {
+        Ok(ret) => ret,
+        Err(ret) => ret as u32,
+    }
+}
+
+#[tracepoint]
+pub fn sys_enter_epoll_pwait(ctx: TracePointContext) -> u32 {
+    match try_sys_enter_epoll_wait(ctx) {
+        Ok(ret) => ret,
+        Err(ret) => ret as u32,
+    }
+}
+
+fn try_sys_enter_epoll_wait(_ctx: TracePointContext) -> Result<u32, i64> {
+    let (tgid, tid) = common::thread_id();
+    if !common::is_risk_target_tgid(tgid) {
+        return Ok(0);
+    }
+
+    let now_ns = unsafe { bpf_ktime_get_ns() };
+    let _ = EPOLL_EVENT_EXIT_NS.remove(&tid);
+    if EPOLL_WAIT_ENTER_NS.insert(&tid, &now_ns, 0).is_err() {
+        increment_risk_tcp_counter(RISK_TCP_EVENT_DROPPED_INDEX);
+    }
+    Ok(0)
+}
+
+#[tracepoint]
+pub fn sys_exit_epoll_wait(ctx: TracePointContext) -> u32 {
+    match try_sys_exit_epoll_wait(ctx) {
+        Ok(ret) => ret,
+        Err(ret) => ret as u32,
+    }
+}
+
+#[tracepoint]
+pub fn sys_exit_epoll_pwait(ctx: TracePointContext) -> u32 {
+    match try_sys_exit_epoll_wait(ctx) {
+        Ok(ret) => ret,
+        Err(ret) => ret as u32,
+    }
+}
+
+fn try_sys_exit_epoll_wait(ctx: TracePointContext) -> Result<u32, i64> {
+    let (tgid, tid) = common::thread_id();
+    if !common::is_risk_target_tgid(tgid) {
+        return Ok(0);
+    }
+    if unsafe { EPOLL_WAIT_ENTER_NS.get(&tid).is_none() } {
+        return Ok(0);
+    }
+    let _ = EPOLL_WAIT_ENTER_NS.remove(&tid);
+
+    let ready: i64 = unsafe { ctx.read_at(16)? };
+    if ready <= 0 {
+        let _ = EPOLL_EVENT_EXIT_NS.remove(&tid);
+        return Ok(0);
+    }
+
+    let now_ns = unsafe { bpf_ktime_get_ns() };
+    if EPOLL_EVENT_EXIT_NS.insert(&tid, &now_ns, 0).is_err() {
+        increment_risk_tcp_counter(RISK_TCP_EVENT_DROPPED_INDEX);
+    }
     Ok(0)
 }
 
@@ -589,10 +682,16 @@ fn try_tcp_recvmsg(ctx: ProbeContext) -> Result<u32, i64> {
     let msg = ctx.arg::<u64>(1).ok_or(1i64)?;
     let (user_buffer, buffer_len) = read_recv_user_buffer(msg).unwrap_or((0, 0));
     let tid = bpf_get_current_pid_tgid() as u32;
+    let recv_enter_ns = unsafe { bpf_ktime_get_ns() };
+    let epoll_exit_ns = unsafe { EPOLL_EVENT_EXIT_NS.get(&tid) }
+        .copied()
+        .unwrap_or(0);
     let inflight = TcpRecvInflight {
         socket_key: sk as u64,
         user_buffer,
         buffer_len,
+        recv_enter_ns,
+        epoll_exit_ns,
     };
     if TCP_RECV_INFLIGHT.insert(&tid, &inflight, 0).is_err() {
         increment_risk_tcp_counter(RISK_TCP_EVENT_DROPPED_INDEX);
@@ -665,6 +764,8 @@ fn try_tcp_recvmsg_ret(ctx: RetProbeContext) -> Result<u32, i64> {
             .unwrap_or(0);
         TcpRequestContext {
             arrival_ns,
+            epoll_exit_ns: inflight.epoll_exit_ns,
+            recv_enter_ns: inflight.recv_enter_ns,
             read_ns: now_ns,
         }
     });
@@ -695,7 +796,63 @@ fn try_tcp_recvmsg_ret(ctx: RetProbeContext) -> Result<u32, i64> {
         increment_risk_tcp_counter(RISK_TCP_ARRIVAL_TO_READ_SLOW_INDEX);
         output_slow_tcp_event(&tuple, now_ns, latency_ns, SLOW_TCP_PHASE_ARRIVAL_TO_READ);
     }
+    record_recv_phase_metrics(
+        &tuple,
+        now_ns,
+        RequestTimings::from_phase_timestamps(
+            request.arrival_ns,
+            request.epoll_exit_ns,
+            request.recv_enter_ns,
+            request.read_ns,
+            request.read_ns,
+        ),
+        config.slow_threshold_ns,
+    );
     Ok(0)
+}
+
+fn record_recv_phase_metrics(
+    tuple: &TcpSocketTuple,
+    timestamp_ns: u64,
+    timings: RequestTimings,
+    slow_threshold_ns: u64,
+) {
+    add_risk_tcp_counter(
+        RISK_TCP_ARRIVAL_TO_EPOLL_LATENCY_NS_INDEX,
+        timings.arrival_to_epoll_ns,
+    );
+    if timings.arrival_to_epoll_ns >= slow_threshold_ns {
+        increment_risk_tcp_counter(RISK_TCP_ARRIVAL_TO_EPOLL_SLOW_INDEX);
+        output_slow_tcp_event(
+            tuple,
+            timestamp_ns,
+            timings.arrival_to_epoll_ns,
+            SLOW_TCP_PHASE_ARRIVAL_TO_EPOLL,
+        );
+    }
+    add_risk_tcp_counter(
+        RISK_TCP_EPOLL_TO_RECV_LATENCY_NS_INDEX,
+        timings.epoll_to_recv_ns,
+    );
+    if timings.epoll_to_recv_ns >= slow_threshold_ns {
+        increment_risk_tcp_counter(RISK_TCP_EPOLL_TO_RECV_SLOW_INDEX);
+        output_slow_tcp_event(
+            tuple,
+            timestamp_ns,
+            timings.epoll_to_recv_ns,
+            SLOW_TCP_PHASE_EPOLL_TO_RECV,
+        );
+    }
+    add_risk_tcp_counter(RISK_TCP_RECV_DURATION_NS_INDEX, timings.recv_duration_ns);
+    if timings.recv_duration_ns >= slow_threshold_ns {
+        increment_risk_tcp_counter(RISK_TCP_RECV_DURATION_SLOW_INDEX);
+        output_slow_tcp_event(
+            tuple,
+            timestamp_ns,
+            timings.recv_duration_ns,
+            SLOW_TCP_PHASE_RECV_DURATION,
+        );
+    }
 }
 
 fn capture_request_head(
@@ -1065,9 +1222,13 @@ fn count_target_tcp_event(ctx: &TracePointContext, counter_index: u32) -> Result
 }
 
 fn increment_risk_tcp_counter(counter_index: u32) {
+    add_risk_tcp_counter(counter_index, 1);
+}
+
+fn add_risk_tcp_counter(counter_index: u32, value: u64) {
     unsafe {
         if let Some(counter) = RISK_TCP_COUNTERS.get_ptr_mut(counter_index) {
-            *counter = (*counter).wrapping_add(1);
+            *counter = (*counter).wrapping_add(value);
         }
     }
 }

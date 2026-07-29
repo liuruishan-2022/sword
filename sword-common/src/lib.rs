@@ -8,6 +8,9 @@ pub const RISK_TARGET_TGIDS_MAX_ENTRIES: u32 = 128;
 pub const SLOW_TCP_PHASE_READ_TO_WRITE: u8 = 1;
 pub const SLOW_TCP_PHASE_ARRIVAL_TO_READ: u8 = 2;
 pub const SLOW_TCP_PHASE_ARRIVAL_TO_WRITE: u8 = 3;
+pub const SLOW_TCP_PHASE_ARRIVAL_TO_EPOLL: u8 = 4;
+pub const SLOW_TCP_PHASE_EPOLL_TO_RECV: u8 = 5;
+pub const SLOW_TCP_PHASE_RECV_DURATION: u8 = 6;
 pub const HTTP_REQUEST_ID_MAX_LEN: usize = 64;
 pub const HTTP_REQUEST_HEAD_MAX_LEN: usize = 512;
 
@@ -183,9 +186,19 @@ impl RequestTimings {
         read_ns: u64,
         write_ns: u64,
     ) -> Self {
+        let valid_epoll =
+            arrival_ns != 0 && epoll_exit_ns >= arrival_ns && recv_enter_ns >= epoll_exit_ns;
         Self {
-            arrival_to_epoll_ns: non_zero_delta(arrival_ns, epoll_exit_ns),
-            epoll_to_recv_ns: non_zero_delta(epoll_exit_ns, recv_enter_ns),
+            arrival_to_epoll_ns: if valid_epoll {
+                epoll_exit_ns - arrival_ns
+            } else {
+                0
+            },
+            epoll_to_recv_ns: if valid_epoll {
+                recv_enter_ns - epoll_exit_ns
+            } else {
+                0
+            },
             recv_duration_ns: non_zero_delta(recv_enter_ns, read_ns),
             arrival_to_read_ns: non_zero_delta(arrival_ns, read_ns),
             read_to_write_ns: non_zero_delta(read_ns, write_ns),
@@ -432,8 +445,7 @@ Content-Type: application/json
 
     #[test]
     fn splits_socket_to_xnio_read_into_epoll_and_recv_phases() {
-        let timings =
-            RequestTimings::from_phase_timestamps(1_000, 11_000, 31_000, 51_000, 651_000);
+        let timings = RequestTimings::from_phase_timestamps(1_000, 11_000, 31_000, 51_000, 651_000);
 
         assert_eq!(timings.arrival_to_epoll_ns, 10_000);
         assert_eq!(timings.epoll_to_recv_ns, 20_000);

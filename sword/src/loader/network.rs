@@ -59,6 +59,10 @@ fn network_tracepoints() -> Vec<TracePointConfig> {
         TracePointConfig::create_syscalls("sys_exit_connect", "sys_exit_connect"),
         TracePointConfig::create_syscalls("sys_enter_socket", "sys_enter_socket"),
         TracePointConfig::create_syscalls("sys_exit_socket", "sys_exit_socket"),
+        TracePointConfig::create_syscalls("sys_enter_epoll_wait", "sys_enter_epoll_wait"),
+        TracePointConfig::create_syscalls("sys_exit_epoll_wait", "sys_exit_epoll_wait"),
+        TracePointConfig::create_syscalls("sys_enter_epoll_pwait", "sys_enter_epoll_pwait"),
+        TracePointConfig::create_syscalls("sys_exit_epoll_pwait", "sys_exit_epoll_pwait"),
         TracePointConfig::create_sock("inet_sock_set_state", "inet_sock_set_state"),
         TracePointConfig::create_tcp("tcp_send_reset", "tcp_send_reset"),
         TracePointConfig::create_tcp("tcp_receive_reset", "tcp_receive_reset"),
@@ -80,5 +84,23 @@ mod tests {
                 && tracepoint.category() == "tcp"
                 && tracepoint.kname() == "tcp_probe"
         }));
+    }
+
+    #[test]
+    fn includes_epoll_wait_and_pwait_tracepoints() {
+        let tracepoints = network_tracepoints();
+
+        for name in [
+            "sys_enter_epoll_wait",
+            "sys_exit_epoll_wait",
+            "sys_enter_epoll_pwait",
+            "sys_exit_epoll_pwait",
+        ] {
+            assert!(tracepoints.iter().any(|tracepoint| {
+                tracepoint.uname() == name
+                    && tracepoint.category() == "syscalls"
+                    && tracepoint.kname() == name
+            }));
+        }
     }
 }

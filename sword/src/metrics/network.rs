@@ -6,8 +6,9 @@ use prometheus_client::metrics::family::Family;
 use prometheus_client::metrics::gauge::Gauge;
 use prometheus_client::registry::Registry;
 use sword_common::{
-    HttpRequestHeadEvent, HttpRequestId, HttpRequestIdState, SLOW_TCP_PHASE_ARRIVAL_TO_READ,
-    SLOW_TCP_PHASE_ARRIVAL_TO_WRITE, SlowTcpEvent, SysEnterType,
+    HttpRequestHeadEvent, HttpRequestId, HttpRequestIdState, SLOW_TCP_PHASE_ARRIVAL_TO_EPOLL,
+    SLOW_TCP_PHASE_ARRIVAL_TO_READ, SLOW_TCP_PHASE_ARRIVAL_TO_WRITE, SLOW_TCP_PHASE_EPOLL_TO_RECV,
+    SLOW_TCP_PHASE_RECV_DURATION, SlowTcpEvent, SysEnterType,
 };
 
 ///
@@ -37,6 +38,12 @@ pub struct NetworkMetrics {
     target_tcp_payload_arrival_total: Gauge<u64, AtomicU64>,
     target_tcp_arrival_to_read_total: Gauge<u64, AtomicU64>,
     target_tcp_arrival_to_read_slow_total: Gauge<u64, AtomicU64>,
+    target_tcp_arrival_to_epoll_latency_ns_total: Gauge<u64, AtomicU64>,
+    target_tcp_arrival_to_epoll_slow_total: Gauge<u64, AtomicU64>,
+    target_tcp_epoll_to_recv_latency_ns_total: Gauge<u64, AtomicU64>,
+    target_tcp_epoll_to_recv_slow_total: Gauge<u64, AtomicU64>,
+    target_tcp_recv_duration_ns_total: Gauge<u64, AtomicU64>,
+    target_tcp_recv_duration_slow_total: Gauge<u64, AtomicU64>,
 }
 
 impl NetworkMetrics {
@@ -114,6 +121,42 @@ impl NetworkMetrics {
             "Total target TCP payload arrival to application read latencies that exceeded the threshold",
             target_tcp_arrival_to_read_slow_total.clone(),
         );
+        let target_tcp_arrival_to_epoll_latency_ns_total = Gauge::default();
+        registry.register(
+            "sword_target_tcp_arrival_to_epoll_latency_ns_total",
+            "Cumulative target TCP payload arrival to epoll wakeup latency in nanoseconds",
+            target_tcp_arrival_to_epoll_latency_ns_total.clone(),
+        );
+        let target_tcp_arrival_to_epoll_slow_total = Gauge::default();
+        registry.register(
+            "sword_target_tcp_arrival_to_epoll_slow_total",
+            "Total target TCP payload arrival to epoll wakeup latencies that exceeded the threshold",
+            target_tcp_arrival_to_epoll_slow_total.clone(),
+        );
+        let target_tcp_epoll_to_recv_latency_ns_total = Gauge::default();
+        registry.register(
+            "sword_target_tcp_epoll_to_recv_latency_ns_total",
+            "Cumulative target TCP epoll wakeup to recvmsg entry latency in nanoseconds",
+            target_tcp_epoll_to_recv_latency_ns_total.clone(),
+        );
+        let target_tcp_epoll_to_recv_slow_total = Gauge::default();
+        registry.register(
+            "sword_target_tcp_epoll_to_recv_slow_total",
+            "Total target TCP epoll wakeup to recvmsg entry latencies that exceeded the threshold",
+            target_tcp_epoll_to_recv_slow_total.clone(),
+        );
+        let target_tcp_recv_duration_ns_total = Gauge::default();
+        registry.register(
+            "sword_target_tcp_recv_duration_ns_total",
+            "Cumulative target TCP recvmsg syscall duration in nanoseconds",
+            target_tcp_recv_duration_ns_total.clone(),
+        );
+        let target_tcp_recv_duration_slow_total = Gauge::default();
+        registry.register(
+            "sword_target_tcp_recv_duration_slow_total",
+            "Total target TCP recvmsg syscall durations that exceeded the threshold",
+            target_tcp_recv_duration_slow_total.clone(),
+        );
         Self {
             pid_tcp_total,
             sys_enter_statistics,
@@ -127,6 +170,12 @@ impl NetworkMetrics {
             target_tcp_payload_arrival_total,
             target_tcp_arrival_to_read_total,
             target_tcp_arrival_to_read_slow_total,
+            target_tcp_arrival_to_epoll_latency_ns_total,
+            target_tcp_arrival_to_epoll_slow_total,
+            target_tcp_epoll_to_recv_latency_ns_total,
+            target_tcp_epoll_to_recv_slow_total,
+            target_tcp_recv_duration_ns_total,
+            target_tcp_recv_duration_slow_total,
         }
     }
 
@@ -161,6 +210,12 @@ impl NetworkMetrics {
         payload_arrivals: u64,
         arrival_to_reads: u64,
         slow_arrival_to_reads: u64,
+        arrival_to_epoll_latency_ns: u64,
+        slow_arrival_to_epolls: u64,
+        epoll_to_recv_latency_ns: u64,
+        slow_epoll_to_recvs: u64,
+        recv_duration_ns: u64,
+        slow_recv_durations: u64,
     ) {
         self.target_tcp_retransmit_total.set(retransmits);
         self.target_tcp_receive_reset_total.set(receive_resets);
@@ -173,6 +228,17 @@ impl NetworkMetrics {
         self.target_tcp_arrival_to_read_total.set(arrival_to_reads);
         self.target_tcp_arrival_to_read_slow_total
             .set(slow_arrival_to_reads);
+        self.target_tcp_arrival_to_epoll_latency_ns_total
+            .set(arrival_to_epoll_latency_ns);
+        self.target_tcp_arrival_to_epoll_slow_total
+            .set(slow_arrival_to_epolls);
+        self.target_tcp_epoll_to_recv_latency_ns_total
+            .set(epoll_to_recv_latency_ns);
+        self.target_tcp_epoll_to_recv_slow_total
+            .set(slow_epoll_to_recvs);
+        self.target_tcp_recv_duration_ns_total.set(recv_duration_ns);
+        self.target_tcp_recv_duration_slow_total
+            .set(slow_recv_durations);
     }
 }
 
@@ -215,6 +281,12 @@ impl NetworkCollector {
             self.per_cpu_counter(7)?,
             self.per_cpu_counter(8)?,
             self.per_cpu_counter(9)?,
+            self.per_cpu_counter(10)?,
+            self.per_cpu_counter(11)?,
+            self.per_cpu_counter(12)?,
+            self.per_cpu_counter(13)?,
+            self.per_cpu_counter(14)?,
+            self.per_cpu_counter(15)?,
         );
         Ok(())
     }
@@ -329,10 +401,12 @@ pub(crate) fn format_slow_tcp_event(event: &SlowTcpEvent) -> String {
             event.family
         );
     }
-    let phase = if event.phase == SLOW_TCP_PHASE_ARRIVAL_TO_READ {
-        "arrival-to-read"
-    } else {
-        "read-to-write"
+    let phase = match event.phase {
+        SLOW_TCP_PHASE_ARRIVAL_TO_READ => "arrival-to-read",
+        SLOW_TCP_PHASE_ARRIVAL_TO_EPOLL => "arrival-to-epoll",
+        SLOW_TCP_PHASE_EPOLL_TO_RECV => "epoll-to-recv",
+        SLOW_TCP_PHASE_RECV_DURATION => "recv-duration",
+        _ => "read-to-write",
     };
     format!(
         "target tcp {phase} slow latency_ms={:.3} pid={} tid={} src={}:{} dst={}:{} family={}",
@@ -366,7 +440,9 @@ mod tests {
     fn exports_target_tcp_transport_metrics() {
         let mut registry = Registry::default();
         let metrics = NetworkMetrics::new(&mut registry);
-        metrics.set_target_tcp_events(7, 6, 5, 4, 3, 2, 1, 8, 9, 10);
+        metrics.set_target_tcp_events(
+            7, 6, 5, 4, 3, 2, 1, 8, 9, 10, 11_000, 12, 13_000, 14, 15_000, 16,
+        );
 
         let mut output = String::new();
         encode(&mut output, &registry).unwrap();
@@ -381,6 +457,12 @@ mod tests {
         assert!(output.contains("sword_target_tcp_payload_arrival_total 8"));
         assert!(output.contains("sword_target_tcp_arrival_to_read_total 9"));
         assert!(output.contains("sword_target_tcp_arrival_to_read_slow_total 10"));
+        assert!(output.contains("sword_target_tcp_arrival_to_epoll_latency_ns_total 11000"));
+        assert!(output.contains("sword_target_tcp_arrival_to_epoll_slow_total 12"));
+        assert!(output.contains("sword_target_tcp_epoll_to_recv_latency_ns_total 13000"));
+        assert!(output.contains("sword_target_tcp_epoll_to_recv_slow_total 14"));
+        assert!(output.contains("sword_target_tcp_recv_duration_ns_total 15000"));
+        assert!(output.contains("sword_target_tcp_recv_duration_slow_total 16"));
     }
 
     #[test]
