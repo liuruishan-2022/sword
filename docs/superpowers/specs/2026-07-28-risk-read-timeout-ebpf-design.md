@@ -125,7 +125,7 @@ read_to_write = 首次tcp_sendmsg - tcp_recvmsg完成
 arrival_to_write = 首次tcp_sendmsg - 首个TCP payload到达
 ```
 
-仅当 `arrival_to_write >= 500ms` 且已提取到 requestId 时输出：
+仅当 `arrival_to_write >= 500ms` 时输出；已提取到 requestId 时一并输出：
 
 ```text
 target http slow requestId=... arrival_to_read_ms=... read_to_write_ms=...
@@ -133,6 +133,87 @@ arrival_to_write_ms=... pid=... tid=... src=... dst=... family=...
 ```
 
 扫描缓冲区使用单元素 Per-CPU Map，不占用 BPF 512 字节栈，也不会在 CPU 之间共享。
+
+## 第三阶段：拆分 Socket 到 XNIO 读取耗时
+
+当前 `arrival_to_read` 只能说明 TCP payload 已经到达 Risk 服务端连接，但目标进程
+尚未完成首次成功读取。为区分内核事件通知、XNIO 事件循环和 Socket 读取三个环节，
+增加以下时间点：
+
+```text
+T0 = tcp:tcp_probe 观察到首个非空 TCP payload
+T1 = XNIO I/O 线程从 epoll_wait/epoll_pwait 返回且返回值大于 0
+T2 = 同一 XNIO I/O 线程进入 tcp_recvmsg
+T3 = tcp_recvmsg 首次成功返回
+T4 = tcp_sendmsg 开始写首个响应
+```
+
+输出并统计以下阶段：
+
+```text
+arrival_to_epoll = T1 - T0
+epoll_to_recv = T2 - T1
+recv_duration = T3 - T2
+read_to_write = T4 - T3
+```
+
+### epoll 探针
+
+优先使用目标节点已有的 syscall tracepoint：
+
+- `syscalls:sys_enter_epoll_wait`
+- `syscalls:sys_exit_epoll_wait`
+- `syscalls:sys_enter_epoll_pwait`
+- `syscalls:sys_exit_epoll_pwait`
+
+只处理目标 TID。入口记录等待开始时间；返回值大于 0 时，按 TID 保存最近一次事件返回
+时间。`tcp_recvmsg` 入口已经能够得到当前 TID 和 socket，因此使用同一 TID 的最近一次
+epoll 返回时间与该 socket 的 payload 到达时间完成关联。返回值等于 0 或小于 0时不更新
+事件返回时间。
+
+若目标节点缺少 `epoll_pwait` tracepoint，则记录警告并继续使用 `epoll_wait`；两类系统
+调用共享相同的 Map 和处理逻辑。
+
+### recvmsg 入口和返回
+
+扩展现有 `TcpRecvInflight`，保存 `recv_enter_ns` 和最近一次有效
+`epoll_exit_ns`。首次成功读取时，将四个时间点写入 socket级请求上下文；后续分片读取
+只用于补充 requestId，不覆盖首次时间。
+
+每个阶段只有达到慢阈值时才输出逐事件 WARN；正常请求只更新无连接标签的累计次数和
+累计耗时。组合慢请求日志继续使用 `arrival_to_write >= 500ms` 的条件，并增加三个分段：
+
+```text
+target http slow requestId=...
+arrival_to_epoll_ms=...
+epoll_to_recv_ms=...
+recv_duration_ms=...
+read_to_write_ms=...
+arrival_to_write_ms=...
+```
+
+requestId 提取失败时仍输出分段耗时，`requestId` 留空，不能因为缺少业务标识丢失性能
+证据。
+
+### XNIO I/O线程调度
+
+复用已有 `sched_wakeup`、`sched_wakeup_new` 和 `sched_switch`，不再增加调度探针。
+用户态根据线程名将 `XNIO-1 I/O-*` 标记为 `thread_role=xnio-io`，将
+`XNIO-1 task-*` 标记为 `thread_role=xnio-worker`。慢 runqueue 日志输出该角色，便于
+判断延迟发生在 I/O线程还是业务工作线程。
+
+### 判定口径
+
+- `arrival_to_epoll` 高、XNIO I/O runqueue高：目标 I/O线程被唤醒后未及时获得 CPU。
+- `arrival_to_epoll` 高、XNIO I/O runqueue低：继续检查 epoll事件通知和 I/O线程当时
+  是否未处于等待状态。
+- `epoll_to_recv` 高：XNIO I/O事件循环正在处理其他就绪连接，出现事件分发积压。
+- `recv_duration` 高：读取等待后续 TCP数据、Socket读取阻塞或内核复制耗时。
+- `read_to_write` 高：工作线程排队或 Risk业务处理耗时。
+
+syscall tracepoint 不解析 `epoll_event` 用户缓冲区中的具体 FD；连接级关联以同一 I/O
+线程的最近一次有效 epoll返回和紧随其后的 `tcp_recvmsg` 为准。因此它用于定位阶段，
+不宣称能够还原完整的 epoll ready-list。
 
 ## 指标
 
@@ -146,6 +227,12 @@ arrival_to_write_ms=... pid=... tid=... src=... dst=... family=...
 - `sword_target_tcp_read_total`
 - `sword_target_tcp_write_total`
 - `sword_target_tcp_read_to_write_slow_total`
+- `sword_target_tcp_arrival_to_epoll_latency_ns_total`
+- `sword_target_tcp_arrival_to_epoll_slow_total`
+- `sword_target_tcp_epoll_to_recv_latency_ns_total`
+- `sword_target_tcp_epoll_to_recv_slow_total`
+- `sword_target_tcp_recv_duration_ns_total`
+- `sword_target_tcp_recv_duration_slow_total`
 - `sword_target_event_dropped_total`
 
 普通慢事件日志只包含耗时、PID/TID、连接地址和端口；500ms 慢请求额外包含
