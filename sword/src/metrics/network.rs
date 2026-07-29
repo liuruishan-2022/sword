@@ -387,6 +387,9 @@ impl SlowTcpEventCorrelator {
         if payload.direction != HTTP_PAYLOAD_DIRECTION_RESPONSE {
             return None;
         }
+        if self.completed_request_ids.contains_key(&payload.socket_key) {
+            return None;
+        }
 
         let request_id = if request_id.is_complete() {
             request_id.request_id()
@@ -685,5 +688,39 @@ Content-Type: application/json
         assert!(format_http_payload_observation(&incoming).contains("target http request"));
         assert!(format_http_payload_observation(&outgoing).contains("target http response"));
         assert!(format_http_payload_observation(&outgoing).contains(request_id));
+    }
+
+    #[test]
+    fn emits_only_one_observation_for_split_response_writes() {
+        let request_id = "7fbb215d-a5d1-4478-b134-fad7a388dea3";
+        let mut request = HttpPayloadEvent {
+            socket_key: 99,
+            direction: HTTP_PAYLOAD_DIRECTION_REQUEST,
+            ..Default::default()
+        };
+        let request_body = format!(r#"{{"requestId":"{request_id}","items":[]}}"#);
+        request.first_payload_len = request_body.len() as u16;
+        request.first_bytes[..request_body.len()].copy_from_slice(request_body.as_bytes());
+        let mut response_headers = HttpPayloadEvent {
+            socket_key: 99,
+            direction: HTTP_PAYLOAD_DIRECTION_RESPONSE,
+            ..Default::default()
+        };
+        let headers = b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n";
+        response_headers.first_payload_len = headers.len() as u16;
+        response_headers.first_bytes[..headers.len()].copy_from_slice(headers);
+        let mut response_body = HttpPayloadEvent {
+            socket_key: 99,
+            direction: HTTP_PAYLOAD_DIRECTION_RESPONSE,
+            ..Default::default()
+        };
+        let body = format!(r#"{{"code":"0","requestId":"{request_id}"}}"#);
+        response_body.first_payload_len = body.len() as u16;
+        response_body.first_bytes[..body.len()].copy_from_slice(body.as_bytes());
+        let mut correlator = SlowTcpEventCorrelator::default();
+
+        assert!(correlator.record_payload(request).is_some());
+        assert!(correlator.record_payload(response_headers).is_some());
+        assert!(correlator.record_payload(response_body).is_none());
     }
 }

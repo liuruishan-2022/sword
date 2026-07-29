@@ -68,6 +68,22 @@ fn network_tracepoints() -> Vec<TracePointConfig> {
         TracePointConfig::create_syscalls("sys_exit_epoll_wait", "sys_exit_epoll_wait"),
         TracePointConfig::create_syscalls("sys_enter_epoll_pwait", "sys_enter_epoll_pwait"),
         TracePointConfig::create_syscalls("sys_exit_epoll_pwait", "sys_exit_epoll_pwait"),
+        TracePointConfig::create_syscalls("sys_enter_read", "sys_enter_read"),
+        TracePointConfig::create_syscalls("sys_exit_read", "sys_exit_read"),
+        TracePointConfig::create_syscalls("sys_enter_readv", "sys_enter_readv"),
+        TracePointConfig::create_syscalls("sys_exit_readv", "sys_exit_readv"),
+        TracePointConfig::create_syscalls("sys_enter_recvfrom", "sys_enter_recvfrom"),
+        TracePointConfig::create_syscalls("sys_exit_recvfrom", "sys_exit_recvfrom"),
+        TracePointConfig::create_syscalls("sys_enter_recvmsg", "sys_enter_recvmsg"),
+        TracePointConfig::create_syscalls("sys_exit_recvmsg", "sys_exit_recvmsg"),
+        TracePointConfig::create_syscalls("sys_enter_write", "sys_enter_write"),
+        TracePointConfig::create_syscalls("sys_exit_write", "sys_exit_write"),
+        TracePointConfig::create_syscalls("sys_enter_writev", "sys_enter_writev"),
+        TracePointConfig::create_syscalls("sys_exit_writev", "sys_exit_writev"),
+        TracePointConfig::create_syscalls("sys_enter_sendto", "sys_enter_sendto"),
+        TracePointConfig::create_syscalls("sys_exit_sendto", "sys_exit_sendto"),
+        TracePointConfig::create_syscalls("sys_enter_sendmsg", "sys_enter_sendmsg"),
+        TracePointConfig::create_syscalls("sys_exit_sendmsg", "sys_exit_sendmsg"),
         TracePointConfig::create_sock("inet_sock_set_state", "inet_sock_set_state"),
         TracePointConfig::create_tcp("tcp_send_reset", "tcp_send_reset"),
         TracePointConfig::create_tcp("tcp_receive_reset", "tcp_receive_reset"),
@@ -114,6 +130,24 @@ mod tests {
                     && tracepoint.category() == "syscalls"
                     && tracepoint.kname() == name
             }));
+        }
+    }
+
+    #[test]
+    fn includes_http_io_syscall_tracepoints() {
+        let tracepoints = network_tracepoints();
+
+        for syscall in [
+            "read", "readv", "recvfrom", "recvmsg", "write", "writev", "sendto", "sendmsg",
+        ] {
+            for phase in ["enter", "exit"] {
+                let name = format!("sys_{phase}_{syscall}");
+                assert!(tracepoints.iter().any(|tracepoint| {
+                    tracepoint.uname() == name
+                        && tracepoint.category() == "syscalls"
+                        && tracepoint.kname() == name
+                }));
+            }
         }
     }
 }
