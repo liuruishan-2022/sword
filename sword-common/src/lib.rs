@@ -16,6 +16,11 @@ pub const HTTP_PAYLOAD_CHUNK_MAX_LEN: usize = 1024;
 pub const HTTP_PAYLOAD_DIRECTION_REQUEST: u8 = 1;
 pub const HTTP_PAYLOAD_DIRECTION_RESPONSE: u8 = 2;
 pub const RISK_TARGET_FLAG_HTTP_TRACE_ALL: u16 = 1;
+pub const LINUX_5_14_IOV_ITER_TYPE_OFFSET: usize = 0;
+pub const LINUX_5_14_IOV_ITER_IOV_OFFSET_OFFSET: usize = 8;
+pub const LINUX_5_14_IOV_ITER_COUNT_OFFSET: usize = 16;
+pub const LINUX_5_14_IOV_ITER_BUFFER_OFFSET: usize = 24;
+pub const LINUX_5_14_ITER_IOVEC: u8 = 0;
 
 pub fn http_request_capture_lengths(bytes_read: u64, buffer_len: u64) -> (usize, usize) {
     let available = bytes_read
@@ -370,9 +375,11 @@ mod tests {
 
     use super::{
         HTTP_PAYLOAD_DIRECTION_REQUEST, HTTP_PAYLOAD_DIRECTION_RESPONSE, HttpPayloadEvent,
-        HttpRequestIdState, RequestTimings, SLOW_TCP_PHASE_ARRIVAL_TO_READ,
-        SLOW_TCP_PHASE_ARRIVAL_TO_WRITE, SLOW_TCP_PHASE_READ_TO_WRITE, SlowTcpEvent, TcpFlowKey,
-        http_request_capture_lengths,
+        HttpRequestIdState, LINUX_5_14_IOV_ITER_BUFFER_OFFSET,
+        LINUX_5_14_IOV_ITER_COUNT_OFFSET, LINUX_5_14_IOV_ITER_IOV_OFFSET_OFFSET,
+        LINUX_5_14_IOV_ITER_TYPE_OFFSET, LINUX_5_14_ITER_IOVEC, RequestTimings,
+        SLOW_TCP_PHASE_ARRIVAL_TO_READ, SLOW_TCP_PHASE_ARRIVAL_TO_WRITE,
+        SLOW_TCP_PHASE_READ_TO_WRITE, SlowTcpEvent, TcpFlowKey, http_request_capture_lengths,
     };
 
     #[test]
@@ -473,5 +480,14 @@ Content-Type: application/json
         assert_eq!(timings.arrival_to_read_ns, 50_000);
         assert_eq!(timings.read_to_write_ns, 600_000);
         assert_eq!(timings.arrival_to_write_ns, 650_000);
+    }
+
+    #[test]
+    fn linux_5_14_iov_iter_layout_is_used_for_http_payload_capture() {
+        assert_eq!(LINUX_5_14_IOV_ITER_TYPE_OFFSET, 0);
+        assert_eq!(LINUX_5_14_IOV_ITER_IOV_OFFSET_OFFSET, 8);
+        assert_eq!(LINUX_5_14_IOV_ITER_COUNT_OFFSET, 16);
+        assert_eq!(LINUX_5_14_IOV_ITER_BUFFER_OFFSET, 24);
+        assert_eq!(LINUX_5_14_ITER_IOVEC, 0);
     }
 }

@@ -21,11 +21,13 @@ use aya_ebpf::{
 };
 use sword_common::{
     HTTP_PAYLOAD_CHUNK_MAX_LEN, HTTP_PAYLOAD_DIRECTION_REQUEST, HTTP_PAYLOAD_DIRECTION_RESPONSE,
-    HttpPayloadEvent, HttpRequestId, RISK_TARGET_FLAG_HTTP_TRACE_ALL, RequestTimings,
-    SLOW_TCP_PHASE_ARRIVAL_TO_EPOLL, SLOW_TCP_PHASE_ARRIVAL_TO_READ,
-    SLOW_TCP_PHASE_ARRIVAL_TO_WRITE, SLOW_TCP_PHASE_EPOLL_TO_RECV, SLOW_TCP_PHASE_READ_TO_WRITE,
-    SLOW_TCP_PHASE_RECV_DURATION, SlowTcpEvent, SysEnterType, TargetPid,
-    http_request_capture_lengths,
+    HttpPayloadEvent, HttpRequestId, LINUX_5_14_IOV_ITER_BUFFER_OFFSET,
+    LINUX_5_14_IOV_ITER_COUNT_OFFSET, LINUX_5_14_IOV_ITER_IOV_OFFSET_OFFSET,
+    LINUX_5_14_IOV_ITER_TYPE_OFFSET, LINUX_5_14_ITER_IOVEC, RISK_TARGET_FLAG_HTTP_TRACE_ALL,
+    RequestTimings, SLOW_TCP_PHASE_ARRIVAL_TO_EPOLL, SLOW_TCP_PHASE_ARRIVAL_TO_READ,
+    SLOW_TCP_PHASE_ARRIVAL_TO_WRITE, SLOW_TCP_PHASE_EPOLL_TO_RECV,
+    SLOW_TCP_PHASE_READ_TO_WRITE, SLOW_TCP_PHASE_RECV_DURATION, SlowTcpEvent, SysEnterType,
+    TargetPid, http_request_capture_lengths,
 };
 
 const AF_INET: u16 = 2;
@@ -48,12 +50,6 @@ const RISK_TCP_RECV_DURATION_NS_INDEX: u32 = 14;
 const RISK_TCP_RECV_DURATION_SLOW_INDEX: u32 = 15;
 const HTTP_REQUEST_SLOW_THRESHOLD_NS: u64 = 500_000_000;
 const MSGHDR_MSG_ITER_OFFSET: usize = 16;
-const IOV_ITER_TYPE_OFFSET: usize = 0;
-const IOV_ITER_IOV_OFFSET_OFFSET: usize = 8;
-const IOV_ITER_BUFFER_OFFSET: usize = 16;
-const IOV_ITER_COUNT_OFFSET: usize = 24;
-const ITER_UBUF: u8 = 0;
-const ITER_IOVEC: u8 = 1;
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -668,20 +664,24 @@ fn try_tcp_recvmsg(ctx: ProbeContext) -> Result<u32, i64> {
 
 fn read_msg_user_buffer(msg: u64) -> Result<(u64, u64), i64> {
     let iter = msg + MSGHDR_MSG_ITER_OFFSET as u64;
-    let iter_type =
-        unsafe { bpf_probe_read_kernel((iter + IOV_ITER_TYPE_OFFSET as u64) as *const u8) }?;
-    let iov_offset =
-        unsafe { bpf_probe_read_kernel((iter + IOV_ITER_IOV_OFFSET_OFFSET as u64) as *const u64) }?;
+    let iter_type = unsafe {
+        bpf_probe_read_kernel((iter + LINUX_5_14_IOV_ITER_TYPE_OFFSET as u64) as *const u8)
+    }?;
+    let iov_offset = unsafe {
+        bpf_probe_read_kernel(
+            (iter + LINUX_5_14_IOV_ITER_IOV_OFFSET_OFFSET as u64) as *const u64,
+        )
+    }?;
+    let count = unsafe {
+        bpf_probe_read_kernel((iter + LINUX_5_14_IOV_ITER_COUNT_OFFSET as u64) as *const u64)
+    }?;
 
-    let (base, len) = if iter_type == ITER_UBUF {
-        let base =
-            unsafe { bpf_probe_read_kernel((iter + IOV_ITER_BUFFER_OFFSET as u64) as *const u64) }?;
-        let len =
-            unsafe { bpf_probe_read_kernel((iter + IOV_ITER_COUNT_OFFSET as u64) as *const u64) }?;
-        (base, len)
-    } else if iter_type == ITER_IOVEC {
-        let iov =
-            unsafe { bpf_probe_read_kernel((iter + IOV_ITER_BUFFER_OFFSET as u64) as *const u64) }?;
+    let (base, len) = if iter_type == LINUX_5_14_ITER_IOVEC {
+        let iov = unsafe {
+            bpf_probe_read_kernel(
+                (iter + LINUX_5_14_IOV_ITER_BUFFER_OFFSET as u64) as *const u64,
+            )
+        }?;
         if iov == 0 {
             return Err(1);
         }
@@ -692,10 +692,10 @@ fn read_msg_user_buffer(msg: u64) -> Result<(u64, u64), i64> {
         return Err(1);
     };
 
-    if base == 0 || iov_offset >= len {
+    if base == 0 || count == 0 || iov_offset >= len {
         return Err(1);
     }
-    Ok((base + iov_offset, len - iov_offset))
+    Ok((base + iov_offset, (len - iov_offset).min(count)))
 }
 
 #[kretprobe]
