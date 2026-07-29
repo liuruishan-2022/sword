@@ -10,11 +10,7 @@ use crate::loader::{KProberConfig, LoaderOptions, TracePointConfig};
 const TARGET_PID: &str = "TARGET_PID";
 
 pub fn load_network_kprobe(ebpf: &mut aya::Ebpf, options: &LoaderOptions) -> anyhow::Result<()> {
-    let mut kprobe_configs = vec![
-        KProberConfig::new("tcp_sendmsg", "tcp_sendmsg"),
-        KProberConfig::new("tcp_recvmsg", "tcp_recvmsg"),
-        KProberConfig::new("tcp_recvmsg_ret", "tcp_recvmsg"),
-    ];
+    let mut kprobe_configs = network_kprobes();
     if options.targeting_enabled() {
         if let Some(pid) = options.target_pid {
             kprobe_configs.push(KProberConfig::new("tcp_v4_connect", "tcp_v4_connect"));
@@ -25,6 +21,15 @@ pub fn load_network_kprobe(ebpf: &mut aya::Ebpf, options: &LoaderOptions) -> any
         }
     }
     Ok(())
+}
+
+fn network_kprobes() -> Vec<KProberConfig> {
+    vec![
+        KProberConfig::new("tcp_data_queue", "tcp_data_queue"),
+        KProberConfig::new("tcp_sendmsg", "tcp_sendmsg"),
+        KProberConfig::new("tcp_recvmsg", "tcp_recvmsg"),
+        KProberConfig::new("tcp_recvmsg_ret", "tcp_recvmsg"),
+    ]
 }
 
 fn configure_tcp_sendmsg_target(ebpf: &mut aya::Ebpf, pid: u32) -> anyhow::Result<()> {
@@ -67,19 +72,27 @@ fn network_tracepoints() -> Vec<TracePointConfig> {
         TracePointConfig::create_tcp("tcp_send_reset", "tcp_send_reset"),
         TracePointConfig::create_tcp("tcp_receive_reset", "tcp_receive_reset"),
         TracePointConfig::create_tcp("tcp_retransmit_skb", "tcp_retransmit_skb"),
-        TracePointConfig::create_tcp("tcp_probe", "tcp_probe"),
     ]
 }
 
 #[cfg(test)]
 mod tests {
-    use super::network_tracepoints;
+    use super::{network_kprobes, network_tracepoints};
 
     #[test]
-    fn includes_tcp_probe_payload_arrival_tracepoint() {
+    fn includes_tcp_data_queue_socket_arrival_kprobe() {
+        let kprobes = network_kprobes();
+
+        assert!(kprobes.iter().any(|kprobe| {
+            kprobe.name() == "tcp_data_queue" && kprobe.fn_name() == "tcp_data_queue"
+        }));
+    }
+
+    #[test]
+    fn does_not_attach_kernel_layout_dependent_tcp_probe() {
         let tracepoints = network_tracepoints();
 
-        assert!(tracepoints.iter().any(|tracepoint| {
+        assert!(!tracepoints.iter().any(|tracepoint| {
             tracepoint.uname() == "tcp_probe"
                 && tracepoint.category() == "tcp"
                 && tracepoint.kname() == "tcp_probe"

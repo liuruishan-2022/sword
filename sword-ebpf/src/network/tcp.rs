@@ -24,7 +24,7 @@ use sword_common::{
     HttpPayloadEvent, HttpRequestId, RISK_TARGET_FLAG_HTTP_TRACE_ALL, RequestTimings,
     SLOW_TCP_PHASE_ARRIVAL_TO_EPOLL, SLOW_TCP_PHASE_ARRIVAL_TO_READ,
     SLOW_TCP_PHASE_ARRIVAL_TO_WRITE, SLOW_TCP_PHASE_EPOLL_TO_RECV, SLOW_TCP_PHASE_READ_TO_WRITE,
-    SLOW_TCP_PHASE_RECV_DURATION, SlowTcpEvent, SysEnterType, TargetPid, TcpFlowKey,
+    SLOW_TCP_PHASE_RECV_DURATION, SlowTcpEvent, SysEnterType, TargetPid,
     http_request_capture_lengths,
 };
 
@@ -106,11 +106,11 @@ pub static HTTP_REQUEST_HEADS: LruHashMap<u64, HttpPayloadEvent> =
 pub static TCP_REQUEST_START: HashMap<u64, TcpRequestContext> = HashMap::with_max_entries(32768, 0);
 
 #[map]
-pub static TCP_PAYLOAD_ARRIVAL: LruHashMap<TcpFlowKey, u64> =
+pub static TCP_PAYLOAD_ARRIVAL: LruHashMap<u64, u64> =
     LruHashMap::with_max_entries(32768, 0);
 
 #[map]
-pub static TCP_ACTIVE_FLOWS: LruHashMap<TcpFlowKey, u8> = LruHashMap::with_max_entries(32768, 0);
+pub static TCP_ACTIVE_FLOWS: LruHashMap<u64, u8> = LruHashMap::with_max_entries(32768, 0);
 
 #[map]
 pub static SLOW_TCP_EVENTS: RingBuf = RingBuf::with_byte_size(256 * 1024, 0);
@@ -155,11 +155,10 @@ pub fn tcp_sendmsg(ctx: ProbeContext) -> u32 {
 fn try_tcp_sendmsg(ctx: ProbeContext) -> Result<u32, u32> {
     let sk: *const sock = ctx.arg(0).ok_or(1u32)?;
     let tuple = read_target_server_socket_tuple(sk)?;
-    let flow = tuple.flow_key()?;
-    let _ = TCP_ACTIVE_FLOWS.remove(&flow);
+    let socket_key = sk as u64;
+    let _ = TCP_ACTIVE_FLOWS.remove(&socket_key);
     increment_risk_tcp_counter(RISK_TCP_WRITE_INDEX);
 
-    let socket_key = sk as u64;
     let Some(request) = (unsafe { TCP_REQUEST_START.get(&socket_key) }).copied() else {
         let _ = HTTP_REQUEST_HEADS.remove(&socket_key);
         return Ok(0);
@@ -283,28 +282,6 @@ struct TcpSocketTuple {
     daddr_v6: [u32; 4],
     sport: u16,
     dport: u16,
-}
-
-impl TcpSocketTuple {
-    fn flow_key(&self) -> Result<TcpFlowKey, u32> {
-        if self.family == AF_INET {
-            return Ok(TcpFlowKey::ipv4(
-                self.saddr_v4,
-                self.daddr_v4,
-                self.sport,
-                self.dport,
-            ));
-        }
-        if self.family == AF_INET6 {
-            return Ok(TcpFlowKey::ipv6(
-                self.saddr_v6,
-                self.daddr_v6,
-                self.sport,
-                self.dport,
-            ));
-        }
-        Err(1)
-    }
 }
 
 fn output_slow_tcp_event(tuple: &TcpSocketTuple, timestamp_ns: u64, latency_ns: u64, phase: u8) {
@@ -447,13 +424,17 @@ fn read_tcp_socket_tuple(sk: *const sock) -> Result<TcpSocketTuple, u32> {
 }
 
 fn read_target_server_socket_tuple(sk: *const sock) -> Result<TcpSocketTuple, u32> {
-    let Some(config) = crate::common::risk_target_config() else {
-        return Err(1);
-    };
     let current_tgid = (bpf_get_current_pid_tgid() >> 32) as u32;
     if !crate::common::is_risk_target_tgid(current_tgid) {
         return Err(1);
     }
+    read_server_socket_tuple(sk)
+}
+
+fn read_server_socket_tuple(sk: *const sock) -> Result<TcpSocketTuple, u32> {
+    let Some(config) = crate::common::risk_target_config() else {
+        return Err(1);
+    };
     let tuple = read_tcp_socket_tuple(sk)?;
     if tuple.sport != config.server_port {
         return Err(1);
@@ -611,85 +592,36 @@ fn try_sys_exit_socket(ctx: TracePointContext) -> Result<u32, i64> {
     Ok(0)
 }
 
-/// Linux 5.14 tcp:tcp_probe records the first payload arrival for a server flow.
-#[tracepoint]
-pub fn tcp_probe(ctx: TracePointContext) -> u32 {
-    match try_tcp_probe(ctx) {
+/// Record when payload enters the target server socket. Using the socket
+/// pointer as the key avoids kernel-dependent IPv6 flow tuple layouts.
+#[kprobe]
+pub fn tcp_data_queue(ctx: ProbeContext) -> u32 {
+    match try_tcp_data_queue(ctx) {
         Ok(ret) => ret,
         Err(err) => err as u32,
     }
 }
 
-fn try_tcp_probe(ctx: TracePointContext) -> Result<u32, i64> {
-    const SPORT_OFFSET: usize = 68;
-    const DPORT_OFFSET: usize = 70;
-    const FAMILY_OFFSET: usize = 72;
-    const DATA_LEN_OFFSET: usize = 80;
-
-    let Some(config) = crate::common::risk_target_config() else {
-        return Ok(0);
-    };
-    let source_port: u16 = unsafe { ctx.read_at(SPORT_OFFSET)? };
-    let data_len: u32 = unsafe { ctx.read_at(DATA_LEN_OFFSET)? };
-    if source_port != config.server_port || data_len == 0 {
-        return Ok(0);
-    }
-
-    let destination_port: u16 = unsafe { ctx.read_at(DPORT_OFFSET)? };
-    let family: u16 = unsafe { ctx.read_at(FAMILY_OFFSET)? };
-    let flow = read_tcp_probe_flow(&ctx, family, source_port, destination_port)?;
+fn try_tcp_data_queue(ctx: ProbeContext) -> Result<u32, i64> {
+    let sk: *const sock = ctx.arg(0).ok_or(1i64)?;
+    read_server_socket_tuple(sk).map_err(|_| 1i64)?;
+    let socket_key = sk as u64;
     increment_risk_tcp_counter(RISK_TCP_PAYLOAD_ARRIVAL_INDEX);
 
-    if unsafe { TCP_ACTIVE_FLOWS.get(&flow) }.is_some()
-        || unsafe { TCP_PAYLOAD_ARRIVAL.get(&flow) }.is_some()
+    if unsafe { TCP_ACTIVE_FLOWS.get(&socket_key) }.is_some()
+        || unsafe { TCP_PAYLOAD_ARRIVAL.get(&socket_key) }.is_some()
     {
         return Ok(0);
     }
 
     let now_ns = unsafe { bpf_ktime_get_ns() };
-    if TCP_PAYLOAD_ARRIVAL.insert(&flow, &now_ns, 0).is_err() {
+    if TCP_PAYLOAD_ARRIVAL
+        .insert(&socket_key, &now_ns, 0)
+        .is_err()
+    {
         increment_risk_tcp_counter(RISK_TCP_EVENT_DROPPED_INDEX);
     }
     Ok(0)
-}
-
-fn read_tcp_probe_flow(
-    ctx: &TracePointContext,
-    family: u16,
-    source_port: u16,
-    destination_port: u16,
-) -> Result<TcpFlowKey, i64> {
-    if family == AF_INET {
-        let source_addr = u32::from_be(unsafe { ctx.read_at::<u32>(16)? });
-        let destination_addr = u32::from_be(unsafe { ctx.read_at::<u32>(44)? });
-        return Ok(TcpFlowKey::ipv4(
-            source_addr,
-            destination_addr,
-            source_port,
-            destination_port,
-        ));
-    }
-    if family == AF_INET6 {
-        let source_addr = [
-            unsafe { ctx.read_at::<u32>(20)? },
-            unsafe { ctx.read_at::<u32>(24)? },
-            unsafe { ctx.read_at::<u32>(28)? },
-            unsafe { ctx.read_at::<u32>(32)? },
-        ];
-        let destination_addr = [
-            unsafe { ctx.read_at::<u32>(48)? },
-            unsafe { ctx.read_at::<u32>(52)? },
-            unsafe { ctx.read_at::<u32>(56)? },
-            unsafe { ctx.read_at::<u32>(60)? },
-        ];
-        return Ok(TcpFlowKey::ipv6(
-            source_addr,
-            destination_addr,
-            source_port,
-            destination_port,
-        ));
-    }
-    Err(1)
 }
 
 ///
@@ -789,12 +721,11 @@ fn try_tcp_recvmsg_ret(ctx: RetProbeContext) -> Result<u32, i64> {
     let socket_key = inflight.socket_key;
     let sk = socket_key as *const sock;
     let tuple = read_target_server_socket_tuple(sk).map_err(|_| 1i64)?;
-    let flow = tuple.flow_key().map_err(|_| 1i64)?;
     let existing = unsafe { TCP_REQUEST_START.get(&socket_key) }.copied();
     let first_read = existing.is_none();
     let now_ns = unsafe { bpf_ktime_get_ns() };
     let request = existing.unwrap_or_else(|| {
-        let arrival_ns = unsafe { TCP_PAYLOAD_ARRIVAL.get(&flow) }
+        let arrival_ns = unsafe { TCP_PAYLOAD_ARRIVAL.get(&socket_key) }
             .copied()
             .unwrap_or(0);
         TcpRequestContext {
@@ -813,11 +744,11 @@ fn try_tcp_recvmsg_ret(ctx: RetProbeContext) -> Result<u32, i64> {
     if !first_read {
         return Ok(0);
     }
-    if TCP_ACTIVE_FLOWS.insert(&flow, &1, 0).is_err() {
+    if TCP_ACTIVE_FLOWS.insert(&socket_key, &1, 0).is_err() {
         increment_risk_tcp_counter(RISK_TCP_EVENT_DROPPED_INDEX);
     }
 
-    let _ = TCP_PAYLOAD_ARRIVAL.remove(&flow);
+    let _ = TCP_PAYLOAD_ARRIVAL.remove(&socket_key);
     if request.arrival_ns == 0 {
         return Ok(0);
     }
