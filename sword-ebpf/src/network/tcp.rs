@@ -21,11 +21,10 @@ use aya_ebpf::{
 };
 use sword_common::{
     HTTP_PAYLOAD_CHUNK_MAX_LEN, HTTP_PAYLOAD_DIRECTION_REQUEST, HTTP_PAYLOAD_DIRECTION_RESPONSE,
-    HttpPayloadEvent, HttpRequestId, RISK_TARGET_FLAG_HTTP_TRACE_ALL, RequestTimings,
-    SLOW_TCP_PHASE_ARRIVAL_TO_EPOLL, SLOW_TCP_PHASE_ARRIVAL_TO_READ,
-    SLOW_TCP_PHASE_ARRIVAL_TO_WRITE, SLOW_TCP_PHASE_EPOLL_TO_RECV, SLOW_TCP_PHASE_READ_TO_WRITE,
-    SLOW_TCP_PHASE_RECV_DURATION, SlowTcpEvent, SysEnterType, TargetPid,
-    http_request_capture_lengths,
+    HttpPayloadEvent, HttpRequestId, RequestTimings, SLOW_TCP_PHASE_ARRIVAL_TO_EPOLL,
+    SLOW_TCP_PHASE_ARRIVAL_TO_READ, SLOW_TCP_PHASE_ARRIVAL_TO_WRITE, SLOW_TCP_PHASE_EPOLL_TO_RECV,
+    SLOW_TCP_PHASE_READ_TO_WRITE, SLOW_TCP_PHASE_RECV_DURATION, SlowTcpEvent, SysEnterType,
+    TargetPid, http_request_capture_lengths, should_trace_http,
 };
 
 const AF_INET: u16 = 2;
@@ -70,7 +69,8 @@ pub struct SyscallIoInflight {
     data_len: u64,
     fd: u64,
     kind: u8,
-    _pad: [u8; 7],
+    capture_payload: u8,
+    _pad: [u8; 6],
 }
 
 #[repr(C)]
@@ -170,11 +170,11 @@ fn try_tcp_sendmsg(ctx: ProbeContext) -> Result<u32, u32> {
     let sk: *const sock = ctx.arg(0).ok_or(1u32)?;
     let tuple = read_target_server_socket_tuple(sk)?;
     let socket_key = sk as u64;
-    link_write_syscall_socket(socket_key);
     let _ = TCP_ACTIVE_FLOWS.remove(&socket_key);
     increment_risk_tcp_counter(RISK_TCP_WRITE_INDEX);
 
     let Some(request) = (unsafe { TCP_REQUEST_START.get(&socket_key) }).copied() else {
+        link_write_syscall_socket(socket_key, false);
         let _ = HTTP_REQUEST_HEADS.remove(&socket_key);
         return Ok(0);
     };
@@ -183,6 +183,7 @@ fn try_tcp_sendmsg(ctx: ProbeContext) -> Result<u32, u32> {
     let now_ns = unsafe { bpf_ktime_get_ns() };
     let read_to_write_ns = now_ns.saturating_sub(request.read_ns);
     let Some(config) = crate::common::risk_target_config() else {
+        link_write_syscall_socket(socket_key, false);
         let _ = HTTP_REQUEST_HEADS.remove(&socket_key);
         return Ok(0);
     };
@@ -205,8 +206,17 @@ fn try_tcp_sendmsg(ctx: ProbeContext) -> Result<u32, u32> {
     );
     let slow_http =
         request.arrival_ns != 0 && timings.arrival_to_write_ns >= HTTP_REQUEST_SLOW_THRESHOLD_NS;
-    let trace_all = config.flags & RISK_TARGET_FLAG_HTTP_TRACE_ALL != 0;
-    if trace_all || slow_http {
+    let trace_http = should_trace_http(
+        config.flags,
+        if request.arrival_ns == 0 {
+            0
+        } else {
+            timings.arrival_to_write_ns
+        },
+        HTTP_REQUEST_SLOW_THRESHOLD_NS,
+    );
+    link_write_syscall_socket(socket_key, trace_http);
+    if trace_http {
         output_http_request_payload(socket_key);
     }
     if slow_http {
@@ -881,7 +891,8 @@ fn begin_syscall_io(ctx: &TracePointContext, kind: u8, write: bool) -> Result<()
             unsafe { ctx.read_at::<u64>(32)? }
         },
         kind,
-        _pad: [0; 7],
+        capture_payload: 0,
+        _pad: [0; 6],
     };
     let result = if write {
         HTTP_WRITE_INFLIGHT.insert(&pid_tgid, &inflight, 0)
@@ -928,9 +939,9 @@ fn finish_syscall_io(ctx: &TracePointContext, write: bool) -> Result<(), i64> {
     if transferred <= 0 || inflight.socket_key == 0 {
         return Ok(());
     }
-    if write {
+    if write && inflight.capture_payload != 0 {
         capture_response_payload(&inflight, transferred as u64);
-    } else {
+    } else if !write {
         capture_request_payload(&inflight, transferred as u64);
     }
     Ok(())
@@ -945,11 +956,12 @@ fn link_read_syscall_socket(socket_key: u64) {
     }
 }
 
-fn link_write_syscall_socket(socket_key: u64) {
+fn link_write_syscall_socket(socket_key: u64, capture_payload: bool) {
     let pid_tgid = bpf_get_current_pid_tgid();
     if let Some(inflight) = HTTP_WRITE_INFLIGHT.get_ptr_mut(&pid_tgid) {
         unsafe {
             (*inflight).socket_key = socket_key;
+            (*inflight).capture_payload = capture_payload as u8;
         }
     }
 }

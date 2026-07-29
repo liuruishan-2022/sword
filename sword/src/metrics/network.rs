@@ -413,7 +413,7 @@ impl SlowTcpEventCorrelator {
         if let Some(request_id) = self
             .completed_request_ids
             .remove(&event.socket_key)
-            .or_else(|| self.request_ids.remove(&event.socket_key))
+            .or_else(|| self.request_ids.get(&event.socket_key).copied())
         {
             event.request_id = request_id;
         }
@@ -722,5 +722,39 @@ Content-Type: application/json
         assert!(correlator.record_payload(request).is_some());
         assert!(correlator.record_payload(response_headers).is_some());
         assert!(correlator.record_payload(response_body).is_none());
+    }
+
+    #[test]
+    fn keeps_request_id_for_response_after_slow_event_enrichment() {
+        let request_id = "7fbb215d-a5d1-4478-b134-fad7a388dea3";
+        let mut request = HttpPayloadEvent {
+            socket_key: 99,
+            direction: HTTP_PAYLOAD_DIRECTION_REQUEST,
+            ..Default::default()
+        };
+        let request_body = format!(r#"{{"requestId":"{request_id}","items":[]}}"#);
+        request.first_payload_len = request_body.len() as u16;
+        request.first_bytes[..request_body.len()].copy_from_slice(request_body.as_bytes());
+        let mut response = HttpPayloadEvent {
+            socket_key: 99,
+            direction: HTTP_PAYLOAD_DIRECTION_RESPONSE,
+            ..Default::default()
+        };
+        let headers = b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n";
+        response.first_payload_len = headers.len() as u16;
+        response.first_bytes[..headers.len()].copy_from_slice(headers);
+        let mut event = SlowTcpEvent {
+            socket_key: 99,
+            phase: SLOW_TCP_PHASE_ARRIVAL_TO_WRITE,
+            ..Default::default()
+        };
+        let mut correlator = SlowTcpEventCorrelator::default();
+
+        assert!(correlator.record_payload(request).is_some());
+        correlator.enrich(&mut event);
+        let outgoing = correlator.record_payload(response).unwrap();
+
+        assert_eq!(event.request_id.as_bytes(), request_id.as_bytes());
+        assert_eq!(outgoing.request_id.as_bytes(), request_id.as_bytes());
     }
 }

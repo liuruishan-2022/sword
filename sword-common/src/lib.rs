@@ -17,6 +17,10 @@ pub const HTTP_PAYLOAD_DIRECTION_REQUEST: u8 = 1;
 pub const HTTP_PAYLOAD_DIRECTION_RESPONSE: u8 = 2;
 pub const RISK_TARGET_FLAG_HTTP_TRACE_ALL: u16 = 1;
 
+pub const fn should_trace_http(flags: u16, latency_ns: u64, threshold_ns: u64) -> bool {
+    flags & RISK_TARGET_FLAG_HTTP_TRACE_ALL != 0 || latency_ns >= threshold_ns
+}
+
 pub fn http_request_capture_lengths(bytes_read: u64, buffer_len: u64) -> (usize, usize) {
     let available = bytes_read
         .min(buffer_len)
@@ -370,9 +374,10 @@ mod tests {
 
     use super::{
         HTTP_PAYLOAD_DIRECTION_REQUEST, HTTP_PAYLOAD_DIRECTION_RESPONSE, HttpPayloadEvent,
-        HttpRequestIdState, RequestTimings, SLOW_TCP_PHASE_ARRIVAL_TO_READ,
-        SLOW_TCP_PHASE_ARRIVAL_TO_WRITE, SLOW_TCP_PHASE_READ_TO_WRITE, SlowTcpEvent, TcpFlowKey,
-        http_request_capture_lengths,
+        HttpRequestIdState, RISK_TARGET_FLAG_HTTP_TRACE_ALL, RequestTimings,
+        SLOW_TCP_PHASE_ARRIVAL_TO_READ, SLOW_TCP_PHASE_ARRIVAL_TO_WRITE,
+        SLOW_TCP_PHASE_READ_TO_WRITE, SlowTcpEvent, TcpFlowKey, http_request_capture_lengths,
+        should_trace_http,
     };
 
     #[test]
@@ -461,6 +466,19 @@ Content-Type: application/json
         assert_eq!(timings.arrival_to_read_ns, 50_000);
         assert_eq!(timings.read_to_write_ns, 600_000);
         assert_eq!(timings.arrival_to_write_ns, 650_000);
+    }
+
+    #[test]
+    fn traces_http_only_when_enabled_or_slow() {
+        let threshold_ns = 500_000_000;
+
+        assert!(!should_trace_http(0, 499_999_999, threshold_ns));
+        assert!(should_trace_http(0, threshold_ns, threshold_ns));
+        assert!(should_trace_http(
+            RISK_TARGET_FLAG_HTTP_TRACE_ALL,
+            1,
+            threshold_ns
+        ));
     }
 
     #[test]
