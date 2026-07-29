@@ -313,7 +313,10 @@ pub(crate) fn format_slow_tcp_event(event: &SlowTcpEvent) -> String {
     if event.phase == SLOW_TCP_PHASE_ARRIVAL_TO_WRITE {
         let request_id = std::str::from_utf8(event.request_id.as_bytes()).unwrap_or("<invalid>");
         return format!(
-            "target http slow requestId={request_id} arrival_to_read_ms={:.3} read_to_write_ms={:.3} arrival_to_write_ms={:.3} pid={} tid={} src={}:{} dst={}:{} family={}",
+            "target http slow requestId={request_id} arrival_to_epoll_ms={:.3} epoll_to_recv_ms={:.3} recv_duration_ms={:.3} arrival_to_read_ms={:.3} read_to_write_ms={:.3} arrival_to_write_ms={:.3} pid={} tid={} src={}:{} dst={}:{} family={}",
+            event.arrival_to_epoll_ns as f64 / 1_000_000.0,
+            event.epoll_to_recv_ns as f64 / 1_000_000.0,
+            event.recv_duration_ns as f64 / 1_000_000.0,
             event.arrival_to_read_ns as f64 / 1_000_000.0,
             event.read_to_write_ns as f64 / 1_000_000.0,
             event.latency_ns as f64 / 1_000_000.0,
@@ -385,6 +388,9 @@ mod tests {
         let event = SlowTcpEvent {
             timestamp_ns: 1,
             latency_ns: 123_000_000,
+            arrival_to_epoll_ns: 0,
+            epoll_to_recv_ns: 0,
+            recv_duration_ns: 0,
             arrival_to_read_ns: 0,
             read_to_write_ns: 0,
             socket_key: 0,
@@ -421,6 +427,9 @@ mod tests {
         let event = SlowTcpEvent {
             timestamp_ns: 1,
             latency_ns: 456_000_000,
+            arrival_to_epoll_ns: 0,
+            epoll_to_recv_ns: 0,
+            recv_duration_ns: 0,
             arrival_to_read_ns: 0,
             read_to_write_ns: 0,
             socket_key: 0,
@@ -449,6 +458,9 @@ mod tests {
         let event = SlowTcpEvent {
             timestamp_ns: 1,
             latency_ns: 650_000_000,
+            arrival_to_epoll_ns: 10_000_000,
+            epoll_to_recv_ns: 20_000_000,
+            recv_duration_ns: 20_000_000,
             arrival_to_read_ns: 50_000_000,
             read_to_write_ns: 600_000_000,
             socket_key: 99,
@@ -468,6 +480,9 @@ mod tests {
 
         assert!(line.contains("target http slow"));
         assert!(line.contains("requestId=7fbb215d-a5d1-4478-b134-fad7a388dea3"));
+        assert!(line.contains("arrival_to_epoll_ms=10.000"));
+        assert!(line.contains("epoll_to_recv_ms=20.000"));
+        assert!(line.contains("recv_duration_ms=20.000"));
         assert!(line.contains("arrival_to_read_ms=50.000"));
         assert!(line.contains("read_to_write_ms=600.000"));
         assert!(line.contains("arrival_to_write_ms=650.000"));

@@ -156,6 +156,9 @@ impl HttpRequestHeadEvent {
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct RequestTimings {
+    pub arrival_to_epoll_ns: u64,
+    pub epoll_to_recv_ns: u64,
+    pub recv_duration_ns: u64,
     pub arrival_to_read_ns: u64,
     pub read_to_write_ns: u64,
     pub arrival_to_write_ns: u64,
@@ -164,11 +167,38 @@ pub struct RequestTimings {
 impl RequestTimings {
     pub fn from_timestamps(arrival_ns: u64, read_ns: u64, write_ns: u64) -> Self {
         Self {
+            arrival_to_epoll_ns: 0,
+            epoll_to_recv_ns: 0,
+            recv_duration_ns: 0,
             arrival_to_read_ns: read_ns.saturating_sub(arrival_ns),
             read_to_write_ns: write_ns.saturating_sub(read_ns),
             arrival_to_write_ns: write_ns.saturating_sub(arrival_ns),
         }
     }
+
+    pub fn from_phase_timestamps(
+        arrival_ns: u64,
+        epoll_exit_ns: u64,
+        recv_enter_ns: u64,
+        read_ns: u64,
+        write_ns: u64,
+    ) -> Self {
+        Self {
+            arrival_to_epoll_ns: non_zero_delta(arrival_ns, epoll_exit_ns),
+            epoll_to_recv_ns: non_zero_delta(epoll_exit_ns, recv_enter_ns),
+            recv_duration_ns: non_zero_delta(recv_enter_ns, read_ns),
+            arrival_to_read_ns: non_zero_delta(arrival_ns, read_ns),
+            read_to_write_ns: non_zero_delta(read_ns, write_ns),
+            arrival_to_write_ns: non_zero_delta(arrival_ns, write_ns),
+        }
+    }
+}
+
+fn non_zero_delta(start_ns: u64, end_ns: u64) -> u64 {
+    if start_ns == 0 || end_ns < start_ns {
+        return 0;
+    }
+    end_ns - start_ns
 }
 
 #[repr(C)]
@@ -225,6 +255,9 @@ impl TcpFlowKey {
 pub struct SlowTcpEvent {
     pub timestamp_ns: u64,
     pub latency_ns: u64,
+    pub arrival_to_epoll_ns: u64,
+    pub epoll_to_recv_ns: u64,
+    pub recv_duration_ns: u64,
     pub arrival_to_read_ns: u64,
     pub read_to_write_ns: u64,
     pub socket_key: u64,
@@ -345,7 +378,7 @@ mod tests {
 
     #[test]
     fn slow_tcp_event_keeps_abi_size_and_has_distinct_phases() {
-        assert_eq!(size_of::<SlowTcpEvent>(), 136);
+        assert_eq!(size_of::<SlowTcpEvent>(), 160);
         assert_eq!(size_of::<HttpRequestHeadEvent>(), 1040);
         assert_ne!(SLOW_TCP_PHASE_READ_TO_WRITE, SLOW_TCP_PHASE_ARRIVAL_TO_READ);
         assert_ne!(
@@ -392,6 +425,19 @@ Content-Type: application/json
     fn splits_arrival_to_write_into_queue_and_processing_time() {
         let timings = RequestTimings::from_timestamps(1_000, 51_000, 651_000);
 
+        assert_eq!(timings.arrival_to_read_ns, 50_000);
+        assert_eq!(timings.read_to_write_ns, 600_000);
+        assert_eq!(timings.arrival_to_write_ns, 650_000);
+    }
+
+    #[test]
+    fn splits_socket_to_xnio_read_into_epoll_and_recv_phases() {
+        let timings =
+            RequestTimings::from_phase_timestamps(1_000, 11_000, 31_000, 51_000, 651_000);
+
+        assert_eq!(timings.arrival_to_epoll_ns, 10_000);
+        assert_eq!(timings.epoll_to_recv_ns, 20_000);
+        assert_eq!(timings.recv_duration_ns, 20_000);
         assert_eq!(timings.arrival_to_read_ns, 50_000);
         assert_eq!(timings.read_to_write_ns, 600_000);
         assert_eq!(timings.arrival_to_write_ns, 650_000);

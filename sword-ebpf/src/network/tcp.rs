@@ -214,6 +214,9 @@ fn output_slow_tcp_event(tuple: &TcpSocketTuple, timestamp_ns: u64, latency_ns: 
     let event = SlowTcpEvent {
         timestamp_ns,
         latency_ns,
+        arrival_to_epoll_ns: 0,
+        epoll_to_recv_ns: 0,
+        recv_duration_ns: 0,
         arrival_to_read_ns: 0,
         read_to_write_ns: 0,
         socket_key: 0,
@@ -242,6 +245,9 @@ fn output_slow_http_event(
     let event = SlowTcpEvent {
         timestamp_ns,
         latency_ns: timings.arrival_to_write_ns,
+        arrival_to_epoll_ns: timings.arrival_to_epoll_ns,
+        epoll_to_recv_ns: timings.epoll_to_recv_ns,
+        recv_duration_ns: timings.recv_duration_ns,
         arrival_to_read_ns: timings.arrival_to_read_ns,
         read_to_write_ns: timings.read_to_write_ns,
         socket_key,

@@ -234,10 +234,18 @@ pub(crate) fn format_slow_sched_event(event: &SlowSchedEvent) -> String {
         .position(|byte| *byte == 0)
         .unwrap_or(event.comm.len());
     let comm = String::from_utf8_lossy(&event.comm[..comm_len]);
+    let thread_role = if comm.starts_with("XNIO-1 I/O-") {
+        "xnio-io"
+    } else if comm.starts_with("XNIO-1 task-") {
+        "xnio-worker"
+    } else {
+        "other"
+    };
     format!(
-        "target thread runqueue slow tid={} comm={} wakeup_ns={} switch_in_ns={} latency_ms={:.3}",
+        "target thread runqueue slow tid={} comm={} thread_role={} wakeup_ns={} switch_in_ns={} latency_ms={:.3}",
         event.tid,
         comm,
+        thread_role,
         event.wakeup_ns,
         event.switch_in_ns,
         event.latency_ns as f64 / 1_000_000.0
@@ -320,7 +328,7 @@ mod tests {
         assert_eq!(decoded, event);
         assert_eq!(
             format_slow_sched_event(&decoded),
-            "target thread runqueue slow tid=3770977 comm=XNIO-1 I/O-3 \
+            "target thread runqueue slow tid=3770977 comm=XNIO-1 I/O-3 thread_role=xnio-io \
 wakeup_ns=1000000 switch_in_ns=151000000 latency_ms=150.000"
         );
     }
