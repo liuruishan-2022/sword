@@ -12,16 +12,19 @@ pub const SLOW_TCP_PHASE_ARRIVAL_TO_EPOLL: u8 = 4;
 pub const SLOW_TCP_PHASE_EPOLL_TO_RECV: u8 = 5;
 pub const SLOW_TCP_PHASE_RECV_DURATION: u8 = 6;
 pub const HTTP_REQUEST_ID_MAX_LEN: usize = 64;
-pub const HTTP_REQUEST_HEAD_MAX_LEN: usize = 512;
+pub const HTTP_PAYLOAD_CHUNK_MAX_LEN: usize = 1024;
+pub const HTTP_PAYLOAD_DIRECTION_REQUEST: u8 = 1;
+pub const HTTP_PAYLOAD_DIRECTION_RESPONSE: u8 = 2;
+pub const RISK_TARGET_FLAG_HTTP_TRACE_ALL: u16 = 1;
 
 pub fn http_request_capture_lengths(bytes_read: u64, buffer_len: u64) -> (usize, usize) {
     let available = bytes_read
         .min(buffer_len)
-        .min((HTTP_REQUEST_HEAD_MAX_LEN * 2) as u64) as usize;
-    let first_len = available.min(HTTP_REQUEST_HEAD_MAX_LEN);
+        .min((HTTP_PAYLOAD_CHUNK_MAX_LEN * 2) as u64) as usize;
+    let first_len = available.min(HTTP_PAYLOAD_CHUNK_MAX_LEN);
     let second_len = available
         .saturating_sub(first_len)
-        .min(HTTP_REQUEST_HEAD_MAX_LEN);
+        .min(HTTP_PAYLOAD_CHUNK_MAX_LEN);
     (first_len, second_len)
 }
 
@@ -122,36 +125,38 @@ impl HttpRequestIdState {
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct HttpRequestHeadEvent {
+pub struct HttpPayloadEvent {
     pub socket_key: u64,
+    pub direction: u8,
+    pub _pad: [u8; 3],
     pub first_payload_len: u16,
     pub second_payload_len: u16,
-    pub _pad: [u8; 4],
-    pub first_bytes: [u8; HTTP_REQUEST_HEAD_MAX_LEN],
-    pub second_bytes: [u8; HTTP_REQUEST_HEAD_MAX_LEN],
+    pub first_bytes: [u8; HTTP_PAYLOAD_CHUNK_MAX_LEN],
+    pub second_bytes: [u8; HTTP_PAYLOAD_CHUNK_MAX_LEN],
 }
 
-impl Default for HttpRequestHeadEvent {
+impl Default for HttpPayloadEvent {
     fn default() -> Self {
         Self {
             socket_key: 0,
+            direction: 0,
+            _pad: [0; 3],
             first_payload_len: 0,
             second_payload_len: 0,
-            _pad: [0; 4],
-            first_bytes: [0; HTTP_REQUEST_HEAD_MAX_LEN],
-            second_bytes: [0; HTTP_REQUEST_HEAD_MAX_LEN],
+            first_bytes: [0; HTTP_PAYLOAD_CHUNK_MAX_LEN],
+            second_bytes: [0; HTTP_PAYLOAD_CHUNK_MAX_LEN],
         }
     }
 }
 
-impl HttpRequestHeadEvent {
+impl HttpPayloadEvent {
     pub fn first_payload(&self) -> &[u8] {
-        let payload_len = (self.first_payload_len as usize).min(HTTP_REQUEST_HEAD_MAX_LEN);
+        let payload_len = (self.first_payload_len as usize).min(HTTP_PAYLOAD_CHUNK_MAX_LEN);
         &self.first_bytes[..payload_len]
     }
 
     pub fn second_payload(&self) -> &[u8] {
-        let payload_len = (self.second_payload_len as usize).min(HTTP_REQUEST_HEAD_MAX_LEN);
+        let payload_len = (self.second_payload_len as usize).min(HTTP_PAYLOAD_CHUNK_MAX_LEN);
         &self.second_bytes[..payload_len]
     }
 }
@@ -219,7 +224,7 @@ fn non_zero_delta(start_ns: u64, end_ns: u64) -> u64 {
 pub struct RiskTargetConfig {
     pub tgid: u32,
     pub server_port: u16,
-    pub _pad: u16,
+    pub flags: u16,
     pub slow_threshold_ns: u64,
 }
 
@@ -364,7 +369,8 @@ mod tests {
     use core::mem::size_of;
 
     use super::{
-        HttpRequestHeadEvent, HttpRequestIdState, RequestTimings, SLOW_TCP_PHASE_ARRIVAL_TO_READ,
+        HTTP_PAYLOAD_DIRECTION_REQUEST, HTTP_PAYLOAD_DIRECTION_RESPONSE, HttpPayloadEvent,
+        HttpRequestIdState, RequestTimings, SLOW_TCP_PHASE_ARRIVAL_TO_READ,
         SLOW_TCP_PHASE_ARRIVAL_TO_WRITE, SLOW_TCP_PHASE_READ_TO_WRITE, SlowTcpEvent, TcpFlowKey,
         http_request_capture_lengths,
     };
@@ -392,7 +398,7 @@ mod tests {
     #[test]
     fn slow_tcp_event_keeps_abi_size_and_has_distinct_phases() {
         assert_eq!(size_of::<SlowTcpEvent>(), 160);
-        assert_eq!(size_of::<HttpRequestHeadEvent>(), 1040);
+        assert_eq!(size_of::<HttpPayloadEvent>(), 2064);
         assert_ne!(SLOW_TCP_PHASE_READ_TO_WRITE, SLOW_TCP_PHASE_ARRIVAL_TO_READ);
         assert_ne!(
             SLOW_TCP_PHASE_ARRIVAL_TO_READ,
@@ -420,9 +426,9 @@ Content-Type: application/json
 
     #[test]
     fn extracts_request_id_after_first_512_bytes_in_one_receive() {
-        let mut payload = [b'x'; 800];
+        let mut payload = [b'x'; 1800];
         let request_id = br#""requestId":"7fbb215d-a5d1-4478-b134-fad7a388dea3""#;
-        payload[600..600 + request_id.len()].copy_from_slice(request_id);
+        payload[1500..1500 + request_id.len()].copy_from_slice(request_id);
 
         let (first_len, second_len) =
             http_request_capture_lengths(payload.len() as u64, payload.len() as u64);
@@ -432,6 +438,20 @@ Content-Type: application/json
 
         assert!(state.is_complete());
         assert_eq!(state.as_bytes(), b"7fbb215d-a5d1-4478-b134-fad7a388dea3");
+    }
+
+    #[test]
+    fn http_payload_event_distinguishes_request_and_response() {
+        let request = HttpPayloadEvent {
+            direction: HTTP_PAYLOAD_DIRECTION_REQUEST,
+            ..Default::default()
+        };
+        let response = HttpPayloadEvent {
+            direction: HTTP_PAYLOAD_DIRECTION_RESPONSE,
+            ..Default::default()
+        };
+
+        assert_ne!(request.direction, response.direction);
     }
 
     #[test]

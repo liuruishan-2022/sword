@@ -4,7 +4,7 @@ use aya::{
     programs::{KProbe, TracePoint},
 };
 use log::info;
-use sword_common::RiskTargetConfig;
+use sword_common::{RISK_TARGET_FLAG_HTTP_TRACE_ALL, RiskTargetConfig};
 
 pub mod cpu;
 pub mod io;
@@ -17,6 +17,7 @@ pub struct LoaderOptions {
     pub target_comm: Option<String>,
     pub server_port: u16,
     pub slow_threshold_ms: u64,
+    pub http_trace_all: bool,
 }
 
 impl LoaderOptions {
@@ -56,6 +57,10 @@ impl LoaderOptions {
             .map(|value| parse_positive_u64("SWORD_SLOW_THRESHOLD_MS", &value))
             .transpose()?
             .unwrap_or(DEFAULT_SLOW_THRESHOLD_MS);
+        let http_trace_all = optional_env(&read_env, "SWORD_HTTP_TRACE_ALL")?
+            .map(|value| parse_bool("SWORD_HTTP_TRACE_ALL", &value))
+            .transpose()?
+            .unwrap_or(false);
 
         while let Some(arg) = args.next() {
             match arg.as_str() {
@@ -113,6 +118,7 @@ impl LoaderOptions {
             target_comm,
             server_port,
             slow_threshold_ms,
+            http_trace_all,
         })
     }
 
@@ -169,6 +175,14 @@ fn parse_positive_u64(name: &str, value: &str) -> anyhow::Result<u64> {
     Ok(value)
 }
 
+fn parse_bool(name: &str, value: &str) -> anyhow::Result<bool> {
+    match value {
+        "true" | "1" => Ok(true),
+        "false" | "0" => Ok(false),
+        _ => Err(anyhow::anyhow!("{name} must be true, false, 1 or 0")),
+    }
+}
+
 ///
 /// 逐步的引入各个模块的tracepoint的跟踪点,按照如下的模块进行引入:
 /// 1. cpu
@@ -213,7 +227,7 @@ fn configure_risk_target(ebpf: &mut aya::Ebpf, options: &LoaderOptions) -> anyho
         RiskTargetConfig {
             tgid: options.target_pid.unwrap_or(0),
             server_port: options.server_port,
-            _pad: 0,
+            flags: u16::from(options.http_trace_all) * RISK_TARGET_FLAG_HTTP_TRACE_ALL,
             slow_threshold_ns: options.slow_threshold_ms * 1_000_000,
         },
         0,
@@ -351,6 +365,7 @@ mod tests {
                 ("SWORD_TARGET_CMDLINE", "content-risk-control-service.jar"),
                 ("SWORD_TARGET_PORT", "8080"),
                 ("SWORD_SLOW_THRESHOLD_MS", "100"),
+                ("SWORD_HTTP_TRACE_ALL", "true"),
             ]),
         )
         .unwrap();
@@ -361,6 +376,7 @@ mod tests {
         );
         assert_eq!(options.server_port, 8080);
         assert_eq!(options.slow_threshold_ms, 100);
+        assert!(options.http_trace_all);
     }
 
     #[test]

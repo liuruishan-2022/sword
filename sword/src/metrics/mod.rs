@@ -17,8 +17,8 @@ use tokio::sync::Mutex;
 
 use crate::metrics::cpu::{CpuCollector, decode_slow_sched_event, format_slow_sched_event};
 use crate::metrics::network::{
-    NetworkCollector, SlowTcpEventCorrelator, decode_http_request_head_event,
-    decode_slow_tcp_event, format_slow_tcp_event,
+    NetworkCollector, SlowTcpEventCorrelator, decode_http_payload_event, decode_slow_tcp_event,
+    format_http_payload_observation, format_slow_tcp_event,
 };
 
 pub mod cpu;
@@ -167,8 +167,10 @@ fn spawn_slow_tcp_event_reader(ring_buf: RingBuf<MapData>) -> anyhow::Result<()>
                 }
             };
             while let Some(item) = guard.get_inner_mut().next() {
-                if let Some(request) = decode_http_request_head_event(&item) {
-                    correlator.record_request(request);
+                if let Some(payload) = decode_http_payload_event(&item) {
+                    if let Some(observation) = correlator.record_payload(payload) {
+                        info!("{}", format_http_payload_observation(&observation));
+                    }
                     continue;
                 }
                 match decode_slow_tcp_event(&item) {

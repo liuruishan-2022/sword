@@ -6,7 +6,8 @@ use prometheus_client::metrics::family::Family;
 use prometheus_client::metrics::gauge::Gauge;
 use prometheus_client::registry::Registry;
 use sword_common::{
-    HttpRequestHeadEvent, HttpRequestId, HttpRequestIdState, SLOW_TCP_PHASE_ARRIVAL_TO_EPOLL,
+    HTTP_PAYLOAD_DIRECTION_REQUEST, HTTP_PAYLOAD_DIRECTION_RESPONSE, HttpPayloadEvent,
+    HttpRequestId, HttpRequestIdState, SLOW_TCP_PHASE_ARRIVAL_TO_EPOLL,
     SLOW_TCP_PHASE_ARRIVAL_TO_READ, SLOW_TCP_PHASE_ARRIVAL_TO_WRITE, SLOW_TCP_PHASE_EPOLL_TO_RECV,
     SLOW_TCP_PHASE_RECV_DURATION, SlowTcpEvent, SysEnterType,
 };
@@ -348,37 +349,92 @@ pub(crate) fn decode_slow_tcp_event(bytes: &[u8]) -> Option<SlowTcpEvent> {
     Some(unsafe { ptr::read_unaligned(bytes.as_ptr().cast::<SlowTcpEvent>()) })
 }
 
-pub(crate) fn decode_http_request_head_event(bytes: &[u8]) -> Option<HttpRequestHeadEvent> {
-    if bytes.len() != size_of::<HttpRequestHeadEvent>() {
+pub(crate) fn decode_http_payload_event(bytes: &[u8]) -> Option<HttpPayloadEvent> {
+    if bytes.len() != size_of::<HttpPayloadEvent>() {
         return None;
     }
-    Some(unsafe { ptr::read_unaligned(bytes.as_ptr().cast::<HttpRequestHeadEvent>()) })
+    Some(unsafe { ptr::read_unaligned(bytes.as_ptr().cast::<HttpPayloadEvent>()) })
 }
 
 #[derive(Default)]
 pub(crate) struct SlowTcpEventCorrelator {
     request_ids: HashMap<u64, HttpRequestId>,
+    completed_request_ids: HashMap<u64, HttpRequestId>,
 }
 
 impl SlowTcpEventCorrelator {
-    pub(crate) fn record_request(&mut self, request: HttpRequestHeadEvent) {
+    pub(crate) fn record_payload(
+        &mut self,
+        payload: HttpPayloadEvent,
+    ) -> Option<HttpPayloadObservation> {
         let mut request_id = HttpRequestIdState::default();
-        request_id.consume(request.first_payload());
-        request_id.consume(request.second_payload());
-        if request_id.is_complete() {
-            self.request_ids
-                .insert(request.socket_key, request_id.request_id());
+        request_id.consume(payload.first_payload());
+        request_id.consume(payload.second_payload());
+
+        if payload.direction == HTTP_PAYLOAD_DIRECTION_REQUEST {
+            self.completed_request_ids.remove(&payload.socket_key);
+            if !request_id.is_complete() {
+                return None;
+            }
+            let request_id = request_id.request_id();
+            self.request_ids.insert(payload.socket_key, request_id);
+            return Some(HttpPayloadObservation {
+                socket_key: payload.socket_key,
+                direction: payload.direction,
+                request_id,
+            });
         }
+        if payload.direction != HTTP_PAYLOAD_DIRECTION_RESPONSE {
+            return None;
+        }
+
+        let request_id = if request_id.is_complete() {
+            request_id.request_id()
+        } else {
+            self.request_ids.get(&payload.socket_key).copied()?
+        };
+        self.request_ids.remove(&payload.socket_key);
+        self.completed_request_ids
+            .insert(payload.socket_key, request_id);
+        Some(HttpPayloadObservation {
+            socket_key: payload.socket_key,
+            direction: payload.direction,
+            request_id,
+        })
     }
 
     pub(crate) fn enrich(&mut self, event: &mut SlowTcpEvent) {
         if event.phase != SLOW_TCP_PHASE_ARRIVAL_TO_WRITE || event.socket_key == 0 {
             return;
         }
-        if let Some(request_id) = self.request_ids.remove(&event.socket_key) {
+        if let Some(request_id) = self
+            .completed_request_ids
+            .remove(&event.socket_key)
+            .or_else(|| self.request_ids.remove(&event.socket_key))
+        {
             event.request_id = request_id;
         }
     }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct HttpPayloadObservation {
+    socket_key: u64,
+    direction: u8,
+    request_id: HttpRequestId,
+}
+
+pub(crate) fn format_http_payload_observation(observation: &HttpPayloadObservation) -> String {
+    let direction = if observation.direction == HTTP_PAYLOAD_DIRECTION_REQUEST {
+        "request"
+    } else {
+        "response"
+    };
+    let request_id = std::str::from_utf8(observation.request_id.as_bytes()).unwrap_or("<invalid>");
+    format!(
+        "target http {direction} requestId={request_id} socket={}",
+        observation.socket_key
+    )
 }
 
 pub(crate) fn format_slow_tcp_event(event: &SlowTcpEvent) -> String {
@@ -428,12 +484,14 @@ mod tests {
     use std::{mem::size_of, slice};
 
     use sword_common::{
-        HttpRequestHeadEvent, HttpRequestIdState, SLOW_TCP_PHASE_ARRIVAL_TO_READ,
-        SLOW_TCP_PHASE_ARRIVAL_TO_WRITE, SLOW_TCP_PHASE_READ_TO_WRITE, SlowTcpEvent,
+        HTTP_PAYLOAD_DIRECTION_REQUEST, HTTP_PAYLOAD_DIRECTION_RESPONSE, HttpPayloadEvent,
+        HttpRequestIdState, SLOW_TCP_PHASE_ARRIVAL_TO_READ, SLOW_TCP_PHASE_ARRIVAL_TO_WRITE,
+        SLOW_TCP_PHASE_READ_TO_WRITE, SlowTcpEvent,
     };
 
     use super::{
-        NetworkMetrics, SlowTcpEventCorrelator, decode_slow_tcp_event, format_slow_tcp_event,
+        NetworkMetrics, SlowTcpEventCorrelator, decode_slow_tcp_event,
+        format_http_payload_observation, format_slow_tcp_event,
     };
 
     #[test]
@@ -577,8 +635,9 @@ Content-Type: application/json
 
 {"reque"#;
         let second_payload = br#"stId":"7fbb215d-a5d1-4478-b134-fad7a388dea3","items":[]}"#;
-        let mut request = HttpRequestHeadEvent::default();
+        let mut request = HttpPayloadEvent::default();
         request.socket_key = 99;
+        request.direction = HTTP_PAYLOAD_DIRECTION_REQUEST;
         request.first_payload_len = first_payload.len() as u16;
         request.second_payload_len = second_payload.len() as u16;
         request.first_bytes[..first_payload.len()].copy_from_slice(first_payload);
@@ -590,12 +649,41 @@ Content-Type: application/json
         };
         let mut correlator = SlowTcpEventCorrelator::default();
 
-        correlator.record_request(request);
+        correlator.record_payload(request);
         correlator.enrich(&mut event);
 
         assert_eq!(
             event.request_id.as_bytes(),
             b"7fbb215d-a5d1-4478-b134-fad7a388dea3"
         );
+    }
+
+    #[test]
+    fn correlates_request_and_response_payloads_by_socket() {
+        let request_id = "7fbb215d-a5d1-4478-b134-fad7a388dea3";
+        let mut request = HttpPayloadEvent {
+            socket_key: 99,
+            direction: HTTP_PAYLOAD_DIRECTION_REQUEST,
+            ..Default::default()
+        };
+        let request_body = format!(r#"{{"requestId":"{request_id}","items":[]}}"#);
+        request.first_payload_len = request_body.len() as u16;
+        request.first_bytes[..request_body.len()].copy_from_slice(request_body.as_bytes());
+        let mut response = HttpPayloadEvent {
+            socket_key: 99,
+            direction: HTTP_PAYLOAD_DIRECTION_RESPONSE,
+            ..Default::default()
+        };
+        let response_body = format!(r#"{{"code":"0","requestId":"{request_id}"}}"#);
+        response.first_payload_len = response_body.len() as u16;
+        response.first_bytes[..response_body.len()].copy_from_slice(response_body.as_bytes());
+        let mut correlator = SlowTcpEventCorrelator::default();
+
+        let incoming = correlator.record_payload(request).unwrap();
+        let outgoing = correlator.record_payload(response).unwrap();
+
+        assert!(format_http_payload_observation(&incoming).contains("target http request"));
+        assert!(format_http_payload_observation(&outgoing).contains("target http response"));
+        assert!(format_http_payload_observation(&outgoing).contains(request_id));
     }
 }

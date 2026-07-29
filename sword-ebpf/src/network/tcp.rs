@@ -20,7 +20,8 @@ use aya_ebpf::{
     programs::{ProbeContext, RetProbeContext, TracePointContext},
 };
 use sword_common::{
-    HTTP_REQUEST_HEAD_MAX_LEN, HttpRequestHeadEvent, HttpRequestId, RequestTimings,
+    HTTP_PAYLOAD_CHUNK_MAX_LEN, HTTP_PAYLOAD_DIRECTION_REQUEST, HTTP_PAYLOAD_DIRECTION_RESPONSE,
+    HttpPayloadEvent, HttpRequestId, RISK_TARGET_FLAG_HTTP_TRACE_ALL, RequestTimings,
     SLOW_TCP_PHASE_ARRIVAL_TO_EPOLL, SLOW_TCP_PHASE_ARRIVAL_TO_READ,
     SLOW_TCP_PHASE_ARRIVAL_TO_WRITE, SLOW_TCP_PHASE_EPOLL_TO_RECV, SLOW_TCP_PHASE_READ_TO_WRITE,
     SLOW_TCP_PHASE_RECV_DURATION, SlowTcpEvent, SysEnterType, TargetPid, TcpFlowKey,
@@ -95,11 +96,10 @@ pub static EPOLL_WAIT_ENTER_NS: HashMap<u32, u64> = HashMap::with_max_entries(40
 pub static EPOLL_EVENT_EXIT_NS: HashMap<u32, u64> = HashMap::with_max_entries(4096, 0);
 
 #[map]
-pub static HTTP_REQUEST_HEAD_BUFFER: PerCpuArray<HttpRequestHeadEvent> =
-    PerCpuArray::with_max_entries(1, 0);
+pub static HTTP_PAYLOAD_BUFFER: PerCpuArray<HttpPayloadEvent> = PerCpuArray::with_max_entries(1, 0);
 
 #[map]
-pub static HTTP_REQUEST_HEADS: LruHashMap<u64, HttpRequestHeadEvent> =
+pub static HTTP_REQUEST_HEADS: LruHashMap<u64, HttpPayloadEvent> =
     LruHashMap::with_max_entries(8192, 0);
 
 #[map]
@@ -182,18 +182,22 @@ fn try_tcp_sendmsg(ctx: ProbeContext) -> Result<u32, u32> {
         );
     }
 
-    if request.arrival_ns != 0 {
-        let timings = RequestTimings::from_phase_timestamps(
-            request.arrival_ns,
-            request.epoll_exit_ns,
-            request.recv_enter_ns,
-            request.read_ns,
-            now_ns,
-        );
-        if timings.arrival_to_write_ns >= HTTP_REQUEST_SLOW_THRESHOLD_NS {
-            output_http_request_head(socket_key);
-            output_slow_http_event(&tuple, socket_key, now_ns, timings);
-        }
+    let timings = RequestTimings::from_phase_timestamps(
+        request.arrival_ns,
+        request.epoll_exit_ns,
+        request.recv_enter_ns,
+        request.read_ns,
+        now_ns,
+    );
+    let slow_http =
+        request.arrival_ns != 0 && timings.arrival_to_write_ns >= HTTP_REQUEST_SLOW_THRESHOLD_NS;
+    let trace_all = config.flags & RISK_TARGET_FLAG_HTTP_TRACE_ALL != 0;
+    if trace_all || slow_http {
+        output_http_request_payload(socket_key);
+        output_http_response_payload(&ctx, socket_key);
+    }
+    if slow_http {
+        output_slow_http_event(&tuple, socket_key, now_ns, timings);
     }
     let _ = HTTP_REQUEST_HEADS.remove(&socket_key);
 
@@ -360,12 +364,43 @@ fn output_slow_http_event(
     }
 }
 
-fn output_http_request_head(socket_key: u64) {
+fn output_http_request_payload(socket_key: u64) {
     let Some(request) = (unsafe { HTTP_REQUEST_HEADS.get(&socket_key) }) else {
         return;
     };
+    output_http_payload(request);
+}
+
+fn output_http_response_payload(ctx: &ProbeContext, socket_key: u64) {
+    let Some(msg) = ctx.arg::<u64>(1) else {
+        return;
+    };
+    let Some(bytes_to_write) = ctx.arg::<u64>(2) else {
+        return;
+    };
+    let Ok((user_buffer, buffer_len)) = read_msg_user_buffer(msg) else {
+        return;
+    };
+    let Some(response) = HTTP_PAYLOAD_BUFFER.get_ptr_mut(0) else {
+        increment_risk_tcp_counter(RISK_TCP_EVENT_DROPPED_INDEX);
+        return;
+    };
+    unsafe {
+        (*response).socket_key = socket_key;
+        (*response).direction = HTTP_PAYLOAD_DIRECTION_RESPONSE;
+        (*response)._pad = [0; 3];
+        (*response).first_payload_len = 0;
+        (*response).second_payload_len = 0;
+    }
+    capture_first_payload_chunks(response, user_buffer, buffer_len, bytes_to_write);
+    if unsafe { (*response).first_payload_len } != 0 {
+        output_http_payload(unsafe { &*response });
+    }
+}
+
+fn output_http_payload(payload: &HttpPayloadEvent) {
     if SLOW_TCP_EVENTS
-        .output::<HttpRequestHeadEvent>(request, 0)
+        .output::<HttpPayloadEvent>(payload, 0)
         .is_err()
     {
         increment_risk_tcp_counter(RISK_TCP_EVENT_DROPPED_INDEX);
@@ -680,7 +715,7 @@ fn try_tcp_recvmsg(ctx: ProbeContext) -> Result<u32, i64> {
     let sk: *const sock = ctx.arg(0).ok_or(1i64)?;
     read_target_server_socket_tuple(sk).map_err(|_| 1i64)?;
     let msg = ctx.arg::<u64>(1).ok_or(1i64)?;
-    let (user_buffer, buffer_len) = read_recv_user_buffer(msg).unwrap_or((0, 0));
+    let (user_buffer, buffer_len) = read_msg_user_buffer(msg).unwrap_or((0, 0));
     let tid = bpf_get_current_pid_tgid() as u32;
     let recv_enter_ns = unsafe { bpf_ktime_get_ns() };
     let epoll_exit_ns = unsafe { EPOLL_EVENT_EXIT_NS.get(&tid) }
@@ -699,7 +734,7 @@ fn try_tcp_recvmsg(ctx: ProbeContext) -> Result<u32, i64> {
     Ok(0)
 }
 
-fn read_recv_user_buffer(msg: u64) -> Result<(u64, u64), i64> {
+fn read_msg_user_buffer(msg: u64) -> Result<(u64, u64), i64> {
     let iter = msg + MSGHDR_MSG_ITER_OFFSET as u64;
     let iter_type =
         unsafe { bpf_probe_read_kernel((iter + IOV_ITER_TYPE_OFFSET as u64) as *const u8) }?;
@@ -866,17 +901,23 @@ fn capture_request_head(
     }
 
     if first_read {
-        let Some(request) = HTTP_REQUEST_HEAD_BUFFER.get_ptr_mut(0) else {
+        let Some(request) = HTTP_PAYLOAD_BUFFER.get_ptr_mut(0) else {
             increment_risk_tcp_counter(RISK_TCP_EVENT_DROPPED_INDEX);
             return;
         };
         unsafe {
             (*request).socket_key = socket_key;
+            (*request).direction = HTTP_PAYLOAD_DIRECTION_REQUEST;
+            (*request)._pad = [0; 3];
             (*request).first_payload_len = 0;
             (*request).second_payload_len = 0;
-            (*request)._pad = [0; 4];
         }
-        capture_first_request_chunks(request, inflight, bytes_read);
+        capture_first_payload_chunks(
+            request,
+            inflight.user_buffer,
+            inflight.buffer_len,
+            bytes_read,
+        );
         if unsafe { (*request).first_payload_len } != 0
             && HTTP_REQUEST_HEADS
                 .insert(&socket_key, unsafe { &*request }, 0)
@@ -890,60 +931,67 @@ fn capture_request_head(
     let Some(request) = HTTP_REQUEST_HEADS.get_ptr_mut(&socket_key) else {
         return;
     };
-    capture_second_request_chunk(request, inflight, bytes_read);
+    capture_second_payload_chunk(
+        request,
+        inflight.user_buffer,
+        inflight.buffer_len,
+        bytes_read,
+    );
 }
 
-fn capture_first_request_chunks(
-    request: *mut HttpRequestHeadEvent,
-    inflight: &TcpRecvInflight,
-    bytes_read: u64,
+fn capture_first_payload_chunks(
+    payload_event: *mut HttpPayloadEvent,
+    user_buffer: u64,
+    buffer_len: u64,
+    payload_len: u64,
 ) {
-    let (first_len, second_len) = http_request_capture_lengths(bytes_read, inflight.buffer_len);
+    let (first_len, second_len) = http_request_capture_lengths(payload_len, buffer_len);
     if first_len == 0 {
         return;
     }
 
-    let destination = unsafe { (*request).first_bytes.as_mut_ptr() };
+    let destination = unsafe { (*payload_event).first_bytes.as_mut_ptr() };
     let payload = unsafe { core::slice::from_raw_parts_mut(destination, first_len) };
-    if unsafe { bpf_probe_read_user_buf(inflight.user_buffer as *const u8, payload) }.is_ok() {
+    if unsafe { bpf_probe_read_user_buf(user_buffer as *const u8, payload) }.is_ok() {
         unsafe {
-            (*request).first_payload_len = first_len as u16;
+            (*payload_event).first_payload_len = first_len as u16;
         }
     }
     if second_len == 0 {
         return;
     }
 
-    let destination = unsafe { (*request).second_bytes.as_mut_ptr() };
+    let destination = unsafe { (*payload_event).second_bytes.as_mut_ptr() };
     let payload = unsafe { core::slice::from_raw_parts_mut(destination, second_len) };
-    let source = inflight.user_buffer + HTTP_REQUEST_HEAD_MAX_LEN as u64;
+    let source = user_buffer + HTTP_PAYLOAD_CHUNK_MAX_LEN as u64;
     if unsafe { bpf_probe_read_user_buf(source as *const u8, payload) }.is_ok() {
         unsafe {
-            (*request).second_payload_len = second_len as u16;
+            (*payload_event).second_payload_len = second_len as u16;
         }
     }
 }
 
-fn capture_second_request_chunk(
-    request: *mut HttpRequestHeadEvent,
-    inflight: &TcpRecvInflight,
-    bytes_read: u64,
+fn capture_second_payload_chunk(
+    payload_event: *mut HttpPayloadEvent,
+    user_buffer: u64,
+    buffer_len: u64,
+    payload_len: u64,
 ) {
-    if unsafe { (*request).second_payload_len } != 0 {
+    if unsafe { (*payload_event).second_payload_len } != 0 {
         return;
     }
-    let copy_len = bytes_read
-        .min(inflight.buffer_len)
-        .min(HTTP_REQUEST_HEAD_MAX_LEN as u64) as usize;
+    let copy_len = payload_len
+        .min(buffer_len)
+        .min(HTTP_PAYLOAD_CHUNK_MAX_LEN as u64) as usize;
     if copy_len == 0 {
         return;
     }
 
-    let destination = unsafe { (*request).second_bytes.as_mut_ptr() };
+    let destination = unsafe { (*payload_event).second_bytes.as_mut_ptr() };
     let payload = unsafe { core::slice::from_raw_parts_mut(destination, copy_len) };
-    if unsafe { bpf_probe_read_user_buf(inflight.user_buffer as *const u8, payload) }.is_ok() {
+    if unsafe { bpf_probe_read_user_buf(user_buffer as *const u8, payload) }.is_ok() {
         unsafe {
-            (*request).second_payload_len = copy_len as u16;
+            (*payload_event).second_payload_len = copy_len as u16;
         }
     }
 }
