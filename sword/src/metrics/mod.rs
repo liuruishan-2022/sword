@@ -15,7 +15,7 @@ use tokio::io::unix::AsyncFd;
 use tokio::net::TcpListener;
 use tokio::sync::Mutex;
 
-use crate::metrics::cpu::CpuCollector;
+use crate::metrics::cpu::{CpuCollector, decode_slow_sched_event, format_slow_sched_event};
 use crate::metrics::network::{
     NetworkCollector, SlowTcpEventCorrelator, decode_http_request_head_event,
     decode_slow_tcp_event, format_slow_tcp_event,
@@ -33,6 +33,7 @@ const SYS_ENTER_OPEN_COUNTER_MAP: &str = "SYS_ENTER_OPEN_COUNTER";
 const SYS_ENTER_CONNECT: &str = "SYS_ENTER_CONNECT";
 const SYS_ENTER_STATISTICS: &str = "SYS_ENTER_STATISTICS";
 const RISK_TCP_COUNTERS_MAP: &str = "RISK_TCP_COUNTERS";
+const SLOW_SCHED_EVENTS_MAP: &str = "SLOW_SCHED_EVENTS";
 const SLOW_TCP_EVENTS_MAP: &str = "SLOW_TCP_EVENTS";
 
 pub async fn spawn_prometheus_exporter(ebpf: &mut aya::Ebpf) -> anyhow::Result<()> {
@@ -67,6 +68,12 @@ pub async fn spawn_prometheus_exporter(ebpf: &mut aya::Ebpf) -> anyhow::Result<(
         .take_map(RUNQUEUE_METRICS_MAP)
         .ok_or_else(|| anyhow::anyhow!("map {RUNQUEUE_METRICS_MAP} not found"))?;
     let runqueue_metrics_map: PerCpuArray<MapData, u64> = PerCpuArray::try_from(map)?;
+
+    let map = ebpf
+        .take_map(SLOW_SCHED_EVENTS_MAP)
+        .ok_or_else(|| anyhow::anyhow!("map {SLOW_SCHED_EVENTS_MAP} not found"))?;
+    let slow_sched_events = RingBuf::try_from(map)?;
+    spawn_slow_sched_event_reader(slow_sched_events)?;
 
     let map = ebpf
         .take_map(SYS_ENTER_CONNECT)
@@ -121,6 +128,29 @@ pub async fn spawn_prometheus_exporter(ebpf: &mut aya::Ebpf) -> anyhow::Result<(
         }
     });
 
+    Ok(())
+}
+
+fn spawn_slow_sched_event_reader(ring_buf: RingBuf<MapData>) -> anyhow::Result<()> {
+    let mut ring_buf = AsyncFd::new(ring_buf)?;
+    tokio::spawn(async move {
+        loop {
+            let mut guard = match ring_buf.readable_mut().await {
+                Ok(guard) => guard,
+                Err(err) => {
+                    error!("slow sched event reader stopped: {err}");
+                    return;
+                }
+            };
+            while let Some(item) = guard.get_inner_mut().next() {
+                match decode_slow_sched_event(&item) {
+                    Some(event) => warn!("{}", format_slow_sched_event(&event)),
+                    None => warn!("discarded malformed slow sched event size={}", item.len()),
+                }
+            }
+            guard.clear_ready();
+        }
+    });
     Ok(())
 }
 

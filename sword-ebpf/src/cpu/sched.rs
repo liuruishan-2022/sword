@@ -4,12 +4,12 @@
 use aya_ebpf::{
     helpers::bpf_ktime_get_ns,
     macros::{map, tracepoint},
-    maps::{HashMap, PerCpuArray},
+    maps::{HashMap, PerCpuArray, RingBuf},
     programs::TracePointContext,
 };
 use sword_common::{
     SCHED_SWITCH_TARGET_TIDS_MAX_ENTRIES, SCHED_SWITCH_THREAD_STATE_MAX_ENTRIES,
-    SchedSwitchStateKey, ThreadComm, ThreadOffCpuStart,
+    SchedSwitchStateKey, SlowSchedEvent, ThreadComm, ThreadOffCpuStart,
 };
 
 const SCHED_SWITCH_PREV_COMM_OFFSET: usize = 12;
@@ -54,6 +54,9 @@ pub static THREAD_WAKEUP_NS: HashMap<u32, u64> =
 
 #[map]
 pub static RUNQUEUE_METRICS: PerCpuArray<u64> = PerCpuArray::with_max_entries(3, 0);
+
+#[map]
+pub static SLOW_SCHED_EVENTS: RingBuf = RingBuf::with_byte_size(64 * 1024, 0);
 
 #[tracepoint]
 pub fn sched_wakeup(ctx: TracePointContext) -> u32 {
@@ -195,6 +198,15 @@ fn handle_switch_in(tid: u32, comm: [u8; 16], now: u64) {
             && latency_ns >= config.slow_threshold_ns
         {
             increment_per_cpu_value(RUNQUEUE_SLOW_COUNT_INDEX, 1);
+            let event = SlowSchedEvent {
+                wakeup_ns: *wakeup_ns,
+                switch_in_ns: now,
+                latency_ns,
+                tid,
+                comm,
+                _pad: 0,
+            };
+            let _ = SLOW_SCHED_EVENTS.output::<SlowSchedEvent>(&event, 0);
         }
         let _ = THREAD_WAKEUP_NS.remove(&tid);
     }

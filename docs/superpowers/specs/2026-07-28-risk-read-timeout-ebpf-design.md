@@ -62,8 +62,18 @@ TGID/TID。同一 Node 上的多个 Risk Pod 使用同一个端口和阈值，�
 runqueue latency = sched_switch 时间 - sched_wakeup 时间
 ```
 
-只在目标 TID Map 中保存状态。Prometheus 输出累计次数、累计时间和慢调度次数，
-不逐次打印调度事件。
+只在目标 TID Map 中保存状态。Prometheus 输出累计次数、累计时间和慢调度次数。
+当单次 runqueue latency 达到慢阈值时，通过独立的 `SLOW_SCHED_EVENTS` RingBuf
+上报并打印以下信息：
+
+```text
+target thread runqueue slow tid=<tid> comm=<comm>
+wakeup_ns=<monotonic-ns> switch_in_ns=<monotonic-ns> latency_ms=<ms>
+```
+
+`wakeup_ns` 与 `switch_in_ns` 均为内核单调时钟，用于和 Sword TCP 事件精确对齐；
+日志自身时间戳用于和 MTR、Risk 应用日志按墙上时钟关联。正常调度事件不进入
+RingBuf，也不为 Prometheus 增加 TID 标签。
 
 ### TCP 异常
 

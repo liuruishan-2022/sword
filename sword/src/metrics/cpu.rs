@@ -1,4 +1,4 @@
-use std::sync::atomic::AtomicU64;
+use std::{mem::size_of, ptr, sync::atomic::AtomicU64};
 
 use aya::maps::{HashMap, MapData, MapError, PerCpuArray};
 use prometheus_client::{
@@ -6,7 +6,7 @@ use prometheus_client::{
     metrics::{family::Family, gauge::Gauge},
     registry::Registry,
 };
-use sword_common::{SchedSwitchStateKey, ThreadComm};
+use sword_common::{SchedSwitchStateKey, SlowSchedEvent, ThreadComm};
 
 ///
 /// 主要是放置CPU的ebpf采集到的相关的指标信息
@@ -220,6 +220,30 @@ impl CpuCollector {
     }
 }
 
+pub(crate) fn decode_slow_sched_event(bytes: &[u8]) -> Option<SlowSchedEvent> {
+    if bytes.len() != size_of::<SlowSchedEvent>() {
+        return None;
+    }
+    Some(unsafe { ptr::read_unaligned(bytes.as_ptr().cast::<SlowSchedEvent>()) })
+}
+
+pub(crate) fn format_slow_sched_event(event: &SlowSchedEvent) -> String {
+    let comm_len = event
+        .comm
+        .iter()
+        .position(|byte| *byte == 0)
+        .unwrap_or(event.comm.len());
+    let comm = String::from_utf8_lossy(&event.comm[..comm_len]);
+    format!(
+        "target thread runqueue slow tid={} comm={} wakeup_ns={} switch_in_ns={} latency_ms={:.3}",
+        event.tid,
+        comm,
+        event.wakeup_ns,
+        event.switch_in_ns,
+        event.latency_ns as f64 / 1_000_000.0
+    )
+}
+
 fn thread_comm_label(thread_comm: &ThreadComm) -> String {
     let len = thread_comm
         .comm
@@ -251,9 +275,12 @@ fn sched_switch_state_label(state: u64) -> String {
 
 #[cfg(test)]
 mod tests {
-    use prometheus_client::{encoding::text::encode, registry::Registry};
+    use std::{mem::size_of, slice};
 
-    use super::CpuMetrics;
+    use prometheus_client::{encoding::text::encode, registry::Registry};
+    use sword_common::SlowSchedEvent;
+
+    use super::{CpuMetrics, decode_slow_sched_event, format_slow_sched_event};
 
     #[test]
     fn exports_target_runqueue_metrics_without_thread_labels() {
@@ -267,5 +294,34 @@ mod tests {
         assert!(output.contains("sword_target_thread_runqueue_total 7"));
         assert!(output.contains("sword_target_thread_runqueue_latency_ns_total 123000000"));
         assert!(output.contains("sword_target_thread_runqueue_slow_total 2"));
+    }
+
+    #[test]
+    fn decodes_and_formats_slow_sched_event() {
+        let mut comm = [0; 16];
+        comm[..12].copy_from_slice(b"XNIO-1 I/O-3");
+        let event = SlowSchedEvent {
+            wakeup_ns: 1_000_000,
+            switch_in_ns: 151_000_000,
+            latency_ns: 150_000_000,
+            tid: 3_770_977,
+            comm,
+            _pad: 0,
+        };
+        let bytes = unsafe {
+            slice::from_raw_parts(
+                (&event as *const SlowSchedEvent).cast::<u8>(),
+                size_of::<SlowSchedEvent>(),
+            )
+        };
+
+        let decoded = decode_slow_sched_event(bytes).expect("valid slow sched event");
+
+        assert_eq!(decoded, event);
+        assert_eq!(
+            format_slow_sched_event(&decoded),
+            "target thread runqueue slow tid=3770977 comm=XNIO-1 I/O-3 \
+wakeup_ns=1000000 switch_in_ns=151000000 latency_ms=150.000"
+        );
     }
 }

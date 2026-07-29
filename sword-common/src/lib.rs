@@ -255,6 +255,17 @@ pub struct ThreadComm {
 }
 
 #[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct SlowSchedEvent {
+    pub wakeup_ns: u64,
+    pub switch_in_ns: u64,
+    pub latency_ns: u64,
+    pub tid: u32,
+    pub comm: [u8; TASK_COMM_LEN],
+    pub _pad: u32,
+}
+
+#[repr(C)]
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
 pub struct ThreadOffCpuStart {
     pub ts_ns: u64,
@@ -295,6 +306,9 @@ unsafe impl aya::Pod for RiskTargetConfig {}
 
 #[cfg(feature = "user")]
 unsafe impl aya::Pod for SlowTcpEvent {}
+
+#[cfg(feature = "user")]
+unsafe impl aya::Pod for SlowSchedEvent {}
 
 #[cfg(feature = "user")]
 unsafe impl aya::Pod for TcpFlowKey {}
