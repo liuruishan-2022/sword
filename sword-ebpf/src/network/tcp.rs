@@ -1246,6 +1246,13 @@ pub fn inet_sock_set_state(ctx: TracePointContext) -> u32 {
     }
 }
 
+fn cleanup_socket_request_state(socket_key: u64) {
+    let _ = TCP_REQUEST_START.remove(&socket_key);
+    let _ = TCP_PAYLOAD_ARRIVAL.remove(&socket_key);
+    let _ = TCP_ACTIVE_FLOWS.remove(&socket_key);
+    let _ = HTTP_REQUEST_HEADS.remove(&socket_key);
+}
+
 fn try_inet_sock_set_state(ctx: TracePointContext) -> Result<u32, i64> {
     unsafe {
         // void * 这个其实是sock类型的指针
@@ -1254,7 +1261,7 @@ fn try_inet_sock_set_state(ctx: TracePointContext) -> Result<u32, i64> {
         let new_state = ctx.read_at::<u32>(20)?;
 
         if new_state == BPF_TCP_CLOSE {
-            let _ = TCP_REQUEST_START.remove(&skaddr);
+            cleanup_socket_request_state(skaddr);
         }
         if old_state == BPF_TCP_SYN_SENT && new_state == BPF_TCP_ESTABLISHED {
             if let Some(start_ns) = START.get(&skaddr) {

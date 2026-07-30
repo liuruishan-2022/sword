@@ -5,9 +5,7 @@ fn tcp_close_cleans_all_socket_request_state() {
         .find("fn cleanup_socket_request_state")
         .expect("socket cleanup helper must exist");
     let cleanup = &source[function_start..];
-    let function_end = cleanup
-        .find("\n}")
-        .expect("socket cleanup helper must end");
+    let function_end = cleanup.find("\n}").expect("socket cleanup helper must end");
     let cleanup = &cleanup[..function_end];
 
     for map in [
