@@ -17,8 +17,12 @@ pub const HTTP_PAYLOAD_DIRECTION_REQUEST: u8 = 1;
 pub const HTTP_PAYLOAD_DIRECTION_RESPONSE: u8 = 2;
 pub const RISK_TARGET_FLAG_HTTP_TRACE_ALL: u16 = 1;
 
+pub const fn is_slow_http(latency_ns: u64, threshold_ns: u64) -> bool {
+    latency_ns >= threshold_ns
+}
+
 pub const fn should_trace_http(flags: u16, latency_ns: u64, threshold_ns: u64) -> bool {
-    flags & RISK_TARGET_FLAG_HTTP_TRACE_ALL != 0 || latency_ns >= threshold_ns
+    flags & RISK_TARGET_FLAG_HTTP_TRACE_ALL != 0 || is_slow_http(latency_ns, threshold_ns)
 }
 
 pub fn http_request_capture_lengths(bytes_read: u64, buffer_len: u64) -> (usize, usize) {
@@ -381,7 +385,7 @@ mod tests {
         HttpRequestIdState, RISK_TARGET_FLAG_HTTP_TRACE_ALL, RequestTimings,
         SLOW_TCP_PHASE_ARRIVAL_TO_READ, SLOW_TCP_PHASE_ARRIVAL_TO_WRITE,
         SLOW_TCP_PHASE_READ_TO_WRITE, SlowTcpEvent, TcpFlowKey, http_request_capture_lengths,
-        should_trace_http,
+        is_slow_http, should_trace_http,
     };
 
     #[test]
@@ -492,6 +496,14 @@ Content-Type: application/json
             1,
             threshold_ns
         ));
+    }
+
+    #[test]
+    fn identifies_slow_http_at_configured_threshold() {
+        let threshold_ns = 100_000_000;
+
+        assert!(!is_slow_http(99_999_999, threshold_ns));
+        assert!(is_slow_http(threshold_ns, threshold_ns));
     }
 
     #[test]

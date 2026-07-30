@@ -24,7 +24,7 @@ use sword_common::{
     HttpPayloadEvent, HttpRequestId, RequestTimings, SLOW_TCP_PHASE_ARRIVAL_TO_EPOLL,
     SLOW_TCP_PHASE_ARRIVAL_TO_READ, SLOW_TCP_PHASE_ARRIVAL_TO_WRITE, SLOW_TCP_PHASE_EPOLL_TO_RECV,
     SLOW_TCP_PHASE_READ_TO_WRITE, SLOW_TCP_PHASE_RECV_DURATION, SlowTcpEvent, SysEnterType,
-    TargetPid, http_request_capture_lengths, should_trace_http,
+    TargetPid, http_request_capture_lengths, is_slow_http, should_trace_http,
 };
 
 const AF_INET: u16 = 2;
@@ -45,7 +45,6 @@ const RISK_TCP_EPOLL_TO_RECV_LATENCY_NS_INDEX: u32 = 12;
 const RISK_TCP_EPOLL_TO_RECV_SLOW_INDEX: u32 = 13;
 const RISK_TCP_RECV_DURATION_NS_INDEX: u32 = 14;
 const RISK_TCP_RECV_DURATION_SLOW_INDEX: u32 = 15;
-const HTTP_REQUEST_SLOW_THRESHOLD_NS: u64 = 500_000_000;
 const SYSCALL_IO_DIRECT: u8 = 1;
 const SYSCALL_IO_VECTOR: u8 = 2;
 const SYSCALL_IO_MESSAGE: u8 = 3;
@@ -205,11 +204,11 @@ fn try_tcp_sendmsg(ctx: ProbeContext) -> Result<u32, u32> {
         now_ns,
     );
     let http_request_latency_ns = timings.http_request_latency_ns();
-    let slow_http = http_request_latency_ns >= HTTP_REQUEST_SLOW_THRESHOLD_NS;
+    let slow_http = is_slow_http(http_request_latency_ns, config.slow_threshold_ns);
     let trace_http = should_trace_http(
         config.flags,
         http_request_latency_ns,
-        HTTP_REQUEST_SLOW_THRESHOLD_NS,
+        config.slow_threshold_ns,
     );
     link_write_syscall_socket(socket_key, trace_http);
     if trace_http {
