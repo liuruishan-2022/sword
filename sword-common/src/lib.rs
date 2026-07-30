@@ -177,6 +177,10 @@ pub struct RequestTimings {
 }
 
 impl RequestTimings {
+    pub const fn http_request_latency_ns(&self) -> u64 {
+        self.read_to_write_ns
+    }
+
     pub fn from_timestamps(arrival_ns: u64, read_ns: u64, write_ns: u64) -> Self {
         Self {
             arrival_to_epoll_ns: 0,
@@ -466,6 +470,15 @@ Content-Type: application/json
         assert_eq!(timings.arrival_to_read_ns, 50_000);
         assert_eq!(timings.read_to_write_ns, 600_000);
         assert_eq!(timings.arrival_to_write_ns, 650_000);
+    }
+
+    #[test]
+    fn http_request_latency_ignores_stale_socket_arrival() {
+        let timings =
+            RequestTimings::from_phase_timestamps(1_000, 11_000, 31_000, 2_051_000, 2_651_000);
+
+        assert_eq!(timings.http_request_latency_ns(), 600_000);
+        assert_eq!(timings.arrival_to_write_ns, 2_650_000);
     }
 
     #[test]

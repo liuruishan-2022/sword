@@ -204,15 +204,11 @@ fn try_tcp_sendmsg(ctx: ProbeContext) -> Result<u32, u32> {
         request.read_ns,
         now_ns,
     );
-    let slow_http =
-        request.arrival_ns != 0 && timings.arrival_to_write_ns >= HTTP_REQUEST_SLOW_THRESHOLD_NS;
+    let http_request_latency_ns = timings.http_request_latency_ns();
+    let slow_http = http_request_latency_ns >= HTTP_REQUEST_SLOW_THRESHOLD_NS;
     let trace_http = should_trace_http(
         config.flags,
-        if request.arrival_ns == 0 {
-            0
-        } else {
-            timings.arrival_to_write_ns
-        },
+        http_request_latency_ns,
         HTTP_REQUEST_SLOW_THRESHOLD_NS,
     );
     link_write_syscall_socket(socket_key, trace_http);
@@ -342,7 +338,7 @@ fn output_slow_http_event(
 ) {
     let event = SlowTcpEvent {
         timestamp_ns,
-        latency_ns: timings.arrival_to_write_ns,
+        latency_ns: timings.http_request_latency_ns(),
         arrival_to_epoll_ns: timings.arrival_to_epoll_ns,
         epoll_to_recv_ns: timings.epoll_to_recv_ns,
         recv_duration_ns: timings.recv_duration_ns,

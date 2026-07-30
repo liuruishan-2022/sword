@@ -444,13 +444,12 @@ pub(crate) fn format_slow_tcp_event(event: &SlowTcpEvent) -> String {
     if event.phase == SLOW_TCP_PHASE_ARRIVAL_TO_WRITE {
         let request_id = std::str::from_utf8(event.request_id.as_bytes()).unwrap_or("<invalid>");
         return format!(
-            "target http slow requestId={request_id} arrival_to_epoll_ms={:.3} epoll_to_recv_ms={:.3} recv_duration_ms={:.3} arrival_to_read_ms={:.3} read_to_write_ms={:.3} arrival_to_write_ms={:.3} pid={} tid={} src={}:{} dst={}:{} family={}",
+            "target http slow requestId={request_id} request_read_to_write_ms={:.3} socket_arrival_to_epoll_ms={:.3} socket_epoll_to_recv_ms={:.3} socket_recv_duration_ms={:.3} socket_arrival_to_read_ms={:.3} pid={} tid={} src={}:{} dst={}:{} family={}",
+            event.latency_ns as f64 / 1_000_000.0,
             event.arrival_to_epoll_ns as f64 / 1_000_000.0,
             event.epoll_to_recv_ns as f64 / 1_000_000.0,
             event.recv_duration_ns as f64 / 1_000_000.0,
             event.arrival_to_read_ns as f64 / 1_000_000.0,
-            event.read_to_write_ns as f64 / 1_000_000.0,
-            event.latency_ns as f64 / 1_000_000.0,
             event.tgid,
             event.tid,
             Ipv4Addr::from(event.source_addr_v4),
@@ -600,7 +599,7 @@ mod tests {
         request_id.consume(br#"{"requestId":"7fbb215d-a5d1-4478-b134-fad7a388dea3","items":[]}"#);
         let event = SlowTcpEvent {
             timestamp_ns: 1,
-            latency_ns: 650_000_000,
+            latency_ns: 600_000_000,
             arrival_to_epoll_ns: 10_000_000,
             epoll_to_recv_ns: 20_000_000,
             recv_duration_ns: 20_000_000,
@@ -623,12 +622,12 @@ mod tests {
 
         assert!(line.contains("target http slow"));
         assert!(line.contains("requestId=7fbb215d-a5d1-4478-b134-fad7a388dea3"));
-        assert!(line.contains("arrival_to_epoll_ms=10.000"));
-        assert!(line.contains("epoll_to_recv_ms=20.000"));
-        assert!(line.contains("recv_duration_ms=20.000"));
-        assert!(line.contains("arrival_to_read_ms=50.000"));
-        assert!(line.contains("read_to_write_ms=600.000"));
-        assert!(line.contains("arrival_to_write_ms=650.000"));
+        assert!(line.contains("request_read_to_write_ms=600.000"));
+        assert!(line.contains("socket_arrival_to_epoll_ms=10.000"));
+        assert!(line.contains("socket_epoll_to_recv_ms=20.000"));
+        assert!(line.contains("socket_recv_duration_ms=20.000"));
+        assert!(line.contains("socket_arrival_to_read_ms=50.000"));
+        assert!(!line.contains("arrival_to_write_ms="));
     }
 
     #[test]
@@ -756,5 +755,48 @@ Content-Type: application/json
 
         assert_eq!(event.request_id.as_bytes(), request_id.as_bytes());
         assert_eq!(outgoing.request_id.as_bytes(), request_id.as_bytes());
+    }
+
+    #[test]
+    fn correlates_keep_alive_requests_with_request_latency() {
+        fn request(socket_key: u64, request_id: &str) -> HttpPayloadEvent {
+            let mut payload = HttpPayloadEvent {
+                socket_key,
+                direction: HTTP_PAYLOAD_DIRECTION_REQUEST,
+                ..Default::default()
+            };
+            let body = format!(r#"{{"requestId":"{request_id}","items":[]}}"#);
+            payload.first_payload_len = body.len() as u16;
+            payload.first_bytes[..body.len()].copy_from_slice(body.as_bytes());
+            payload
+        }
+
+        let mut correlator = SlowTcpEventCorrelator::default();
+        let mut first = SlowTcpEvent {
+            socket_key: 99,
+            phase: SLOW_TCP_PHASE_ARRIVAL_TO_WRITE,
+            latency_ns: 550_000_000,
+            read_to_write_ns: 50_000_000,
+            ..Default::default()
+        };
+        let mut second = SlowTcpEvent {
+            socket_key: 99,
+            phase: SLOW_TCP_PHASE_ARRIVAL_TO_WRITE,
+            latency_ns: 600_000_000,
+            read_to_write_ns: 600_000_000,
+            ..Default::default()
+        };
+
+        correlator.record_payload(request(99, "request-a"));
+        correlator.enrich(&mut first);
+        correlator.record_payload(request(99, "request-b"));
+        correlator.enrich(&mut second);
+
+        assert_eq!(first.request_id.as_bytes(), b"request-a");
+        assert_eq!(second.request_id.as_bytes(), b"request-b");
+        let line = format_slow_tcp_event(&second);
+        assert!(line.contains("requestId=request-b"));
+        assert!(line.contains("request_read_to_write_ms=600.000"));
+        assert!(!line.contains("arrival_to_write_ms="));
     }
 }
