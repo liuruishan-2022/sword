@@ -17,7 +17,7 @@ use aya_ebpf::{
     },
     macros::{kprobe, map, tracepoint},
     maps::{Array, HashMap, PerCpuHashMap},
-    programs::{ProbeContext, TracePointContext},
+    programs::{ProbeContext, TracePointContext, probe},
 };
 use aya_log_ebpf::info;
 use sword_common::{SysEnterType, TargetPid};
@@ -40,15 +40,15 @@ pub static START: HashMap<u64, u64> = HashMap::with_max_entries(4096, 0);
 pub static SYS_ENTER_STATISTICS: PerCpuHashMap<SysEnterType, u64> =
     PerCpuHashMap::with_max_entries(4096, 0);
 
-pub unsafe fn sys_enter_statistics_inc(pid: u32, enter_type: u32) -> Result<u32, i64> {
+pub fn sys_enter_statistics_inc(pid: u32, enter_type: u32) -> Result<u32, i64> {
     let key = SysEnterType {
         pid: 1,
         enter_type: enter_type,
     };
     match SYS_ENTER_STATISTICS.get_ptr_mut(&key) {
-        Some(count) => {
+        Some(count) => unsafe {
             *count = *count + 1;
-        }
+        },
         None => {
             SYS_ENTER_STATISTICS.insert(&key, 1, 0)?;
         }
@@ -75,107 +75,7 @@ fn try_tcp_sendmsg(ctx: ProbeContext) -> Result<u32, u32> {
     if !matches_tcp_sendmsg_target()? {
         return Ok(0);
     }
-
-    let sk: *const sock = ctx.arg(0).ok_or(1u32)?;
-    let size: usize = ctx.arg(2).ok_or(1u32)?;
-    let tuple = read_tcp_socket_tuple(sk)?;
-
-    match tuple.family {
-        AF_INET => info!(
-            &ctx,
-            "tcp_sendmsg pid={} tid={} family=ipv4 src={}.{}.{}.{}:{} dst={}.{}.{}.{}:{} size={}",
-            tuple.pid,
-            tuple.tid,
-            ipv4_octet(tuple.saddr_v4, 0),
-            ipv4_octet(tuple.saddr_v4, 1),
-            ipv4_octet(tuple.saddr_v4, 2),
-            ipv4_octet(tuple.saddr_v4, 3),
-            tuple.sport,
-            ipv4_octet(tuple.daddr_v4, 0),
-            ipv4_octet(tuple.daddr_v4, 1),
-            ipv4_octet(tuple.daddr_v4, 2),
-            ipv4_octet(tuple.daddr_v4, 3),
-            tuple.dport,
-            size
-        ),
-        AF_INET6 => info!(
-            &ctx,
-            "tcp_sendmsg pid={} tid={} family=ipv6 src={:x}:{:x}:{:x}:{:x}:{} dst={:x}:{:x}:{:x}:{:x}:{} size={}",
-            tuple.pid,
-            tuple.tid,
-            tuple.saddr_v6[0],
-            tuple.saddr_v6[1],
-            tuple.saddr_v6[2],
-            tuple.saddr_v6[3],
-            tuple.sport,
-            tuple.daddr_v6[0],
-            tuple.daddr_v6[1],
-            tuple.daddr_v6[2],
-            tuple.daddr_v6[3],
-            tuple.dport,
-            size
-        ),
-        _ => info!(
-            &ctx,
-            "tcp_sendmsg pid={} tid={} family={} size={}", tuple.pid, tuple.tid, tuple.family, size
-        ),
-    }
-
     Ok(0)
-}
-struct TcpSocketTuple {
-    pid: u32,
-    tid: u32,
-    family: u16,
-    saddr_v4: u32,
-    daddr_v4: u32,
-    saddr_v6: [u32; 4],
-    daddr_v6: [u32; 4],
-    sport: u16,
-    dport: u16,
-}
-
-fn read_tcp_socket_tuple(sk: *const sock) -> Result<TcpSocketTuple, u32> {
-    if sk.is_null() {
-        return Err(1);
-    }
-
-    let pid_tgid = bpf_get_current_pid_tgid();
-    let pid = (pid_tgid >> 32) as u32;
-    let tid = pid_tgid as u32;
-    let sk_common = unsafe { bpf_probe_read_kernel(&(*sk).__sk_common as *const sock_common) }
-        .map_err(|_| 1u32)?;
-    let family = sk_common.skc_family as u16;
-    let ports = unsafe { sk_common.__bindgen_anon_3.__bindgen_anon_1 };
-    let sport = ports.skc_num as u16;
-    let dport = u16::from_be(ports.skc_dport as u16);
-
-    let mut tuple = TcpSocketTuple {
-        pid,
-        tid,
-        family,
-        saddr_v4: 0,
-        daddr_v4: 0,
-        saddr_v6: [0; 4],
-        daddr_v6: [0; 4],
-        sport,
-        dport,
-    };
-
-    if family == AF_INET {
-        let addrs = unsafe { sk_common.__bindgen_anon_1.__bindgen_anon_1 };
-        tuple.saddr_v4 = u32::from_be(addrs.skc_rcv_saddr as u32);
-        tuple.daddr_v4 = u32::from_be(addrs.skc_daddr as u32);
-    } else if family == AF_INET6 {
-        tuple.saddr_v6 = unsafe { sk_common.skc_v6_rcv_saddr.in6_u.u6_addr32 };
-        tuple.daddr_v6 = unsafe { sk_common.skc_v6_daddr.in6_u.u6_addr32 };
-    }
-
-    Ok(tuple)
-}
-
-fn ipv4_octet(addr: u32, index: u32) -> u32 {
-    (addr >> (24 - index * 8)) & 0xff
 }
 
 fn matches_tcp_sendmsg_target() -> Result<bool, u32> {
@@ -348,9 +248,6 @@ pub fn tcp_recvmsg(ctx: ProbeContext) -> u32 {
 }
 
 fn try_tcp_recvmsg(ctx: ProbeContext) -> Result<u32, i64> {
-    unsafe {
-        let sock: *const sock = ctx.arg(0).ok_or(1u32)?;
-    }
     Ok(0)
 }
 
@@ -663,5 +560,24 @@ fn try_tcp_send_reset(ctx: TracePointContext) -> Result<u32, i64> {
         );
     }
 
+    Ok(0)
+}
+
+///
+/// 抓取 kprobe:tcp_send_active_reset
+///sudo bpftrace -lv 'kfunc:vmlinux:tcp_send_active_reset
+/// kfunc:vmlinux:tcp_send_active_reset
+///    struct sock * sk
+///    gfp_t priority
+///
+#[kprobe]
+pub fn tcp_send_active_reset(ctx: ProbeContext) -> u32 {
+    match try_tcp_send_active_reset(ctx) {
+        Ok(ret) => ret,
+        Err(err) => err as u32,
+    }
+}
+
+fn try_tcp_send_active_reset(ctx: ProbeContext) -> Result<u32, i64> {
     Ok(0)
 }
