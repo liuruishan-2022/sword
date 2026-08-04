@@ -3,7 +3,7 @@ use std::fs;
 use clap::Parser;
 use walkdir::WalkDir;
 
-#[derive(Parser, Debug)]
+#[derive(Parser, Debug, Clone)]
 #[command(author,version,about,long_about = None)]
 pub struct LoadOptions {
     #[arg(long, short = 'c')]
@@ -11,6 +11,10 @@ pub struct LoadOptions {
 }
 
 impl LoadOptions {
+    pub fn command(&self) -> &str {
+        &self.command
+    }
+
     pub fn first_target_pid(&self) -> Option<u32> {
         return self.target_pid().into_iter().next();
     }
