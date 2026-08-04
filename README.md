@@ -20,52 +20,6 @@ RUST_LOG=info cargo run --release
 Cargo build scripts are used to automatically build the eBPF correctly and include it in the
 program.
 
-## Risk ReadTimeout short-term tracing
-
-The DaemonSet discovers every matching Risk process in the host PID namespace and refreshes the
-target process/thread maps every five seconds:
-
-```yaml
-env:
-- name: SWORD_TARGET_CMDLINE
-  value: "content-risk-control-service.jar"
-- name: SWORD_TARGET_PORT
-  value: "8080"
-- name: SWORD_SLOW_THRESHOLD_MS
-  value: "100"
-```
-
-`SWORD_TARGET_PORT` is the Risk Pod's listening port, not its NodePort. A Risk Pod restart does not
-require a DaemonSet restart.
-
-For a one-off manual diagnosis, run `sword` on the Kubernetes node that hosts the target service:
-
-```shell
-sudo RUST_LOG=info ./target/release/sword \
-  --target-pid <host-tgid> \
-  --server-port 8080 \
-  --slow-threshold-ms 100
-```
-
-- `--target-pid` is the target process TGID in the node PID namespace, not a container-local PID.
-- The server port defaults to `8080`; both slow-phase thresholds default to `100ms`.
-- Prometheus metrics are available at `http://0.0.0.0:9898/metrics`.
-- WARN events distinguish two phases:
-  - `target tcp arrival-to-read slow`: TCP payload reached the target server flow, but the target
-    process did not complete its first successful `tcp_recvmsg` within the threshold.
-  - `target tcp read-to-write slow`: the target process completed its first TCP read, but did not
-    start its first TCP write within the threshold.
-- Arrival-to-read tracing currently reads the Linux 5.14 `tcp:tcp_probe` tracepoint layout. Deploy
-  it only on nodes where that tracepoint is present and has the expected field offsets.
-- The additional Prometheus metrics are:
-  - `sword_target_tcp_payload_arrival_total`
-  - `sword_target_tcp_arrival_to_read_total`
-  - `sword_target_tcp_arrival_to_read_slow_total`
-- The tracer records only timing, PID/TID, IP addresses and ports. It does not read HTTP headers,
-  bodies, request IDs, phone numbers or message content.
-- Use this mode for a short 5–15 minute diagnostic window and compare TPS, p99 and node CPU against
-  an untraced baseline.
-
 ## Cross-compiling on macOS
 
 Cross compilation should work on both Intel and Apple Silicon Macs.

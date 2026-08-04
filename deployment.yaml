@@ -54,12 +54,6 @@ spec:
         env:
         - name: RUST_LOG
           value: "info"
-        - name: SWORD_TARGET_CMDLINE
-          value: "content-risk-control-service.jar"
-        - name: SWORD_TARGET_PORT
-          value: "8080"
-        - name: SWORD_SLOW_THRESHOLD_MS
-          value: "100"
         ports:
         - containerPort: 9898
           hostPort: 9898
