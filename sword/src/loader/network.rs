@@ -17,6 +17,7 @@ pub fn load_network_kprobe(ebpf: &mut aya::Ebpf, options: &LoadOptions) -> anyho
         KProberConfig::new("tcp_send_active_reset", "tcp_send_active_reset"),
     ];
     if let Some(pid) = options.first_target_pid() {
+        info!("监听到我们的进程:{pid}");
         configure_tcp_sendmsg_target(ebpf, pid)?;
         for ele in kprobe_configs {
             ele.load_kprobe(ebpf)?;

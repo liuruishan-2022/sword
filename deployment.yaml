@@ -38,12 +38,15 @@ spec:
       hostPID: true
       hostIPC: true
       nodeSelector:
-        kops.k8s.io/ebpf: enabled
+        kubernetes.io/os: linux
       serviceAccountName: sword-ebpf
       containers:
       - name: sword
-        image: xwharbor.wxchina.com/cpaas/component/sword:v0.1.0-7f7a0d6561
+        image: xwharbor.wxchina.com/cpaas/component/sword:v0.1.0-7197d7292c
         imagePullPolicy: IfNotPresent
+        args:
+        - "--command"
+        - "cpaas-gateway"
         securityContext:
           privileged: true
           capabilities:
@@ -79,7 +82,7 @@ spec:
             cpu: "2"
             memory: "256Mi"
           requests:
-            cpu: "500m"
+            cpu: "10m"
             memory: "64Mi"
         volumeMounts:
         - name: sys
