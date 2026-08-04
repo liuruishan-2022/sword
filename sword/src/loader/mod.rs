@@ -8,40 +8,6 @@ pub mod cpu;
 pub mod io;
 pub mod network;
 
-#[derive(Debug)]
-pub struct LoaderOptions {
-    pub tcp_sendmsg_pid: Option<u32>,
-}
-
-impl LoaderOptions {
-    pub fn parse_args() -> anyhow::Result<Self> {
-        let mut args = std::env::args().skip(1);
-        let mut tcp_sendmsg_pid = None;
-
-        while let Some(arg) = args.next() {
-            match arg.as_str() {
-                "--target-pid" => {
-                    let value = args
-                        .next()
-                        .ok_or_else(|| anyhow::anyhow!("--target-pid requires a value"))?;
-                    info!("获取到的pid为:{}!", value);
-                    let pid = value
-                        .parse::<u32>()
-                        .map_err(|err| anyhow::anyhow!("invalid --target-pid {value}: {err}"))?;
-                    tcp_sendmsg_pid = Some(pid);
-                }
-                "--help" | "-h" => {
-                    println!("Usage: sword [--target-pid PID]");
-                    std::process::exit(0);
-                }
-                _ => return Err(anyhow::anyhow!("unknown argument: {arg}")),
-            }
-        }
-
-        Ok(Self { tcp_sendmsg_pid })
-    }
-}
-
 ///
 /// 逐步的引入各个模块的tracepoint的跟踪点,按照如下的模块进行引入:
 /// 1. cpu

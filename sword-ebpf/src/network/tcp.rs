@@ -72,17 +72,22 @@ pub fn tcp_sendmsg(ctx: ProbeContext) -> u32 {
 }
 
 fn try_tcp_sendmsg(ctx: ProbeContext) -> Result<u32, u32> {
-    if !matches_tcp_sendmsg_target()? {
+    if !match_current_pid()? {
         return Ok(0);
     }
     Ok(0)
 }
 
-fn matches_tcp_sendmsg_target() -> Result<bool, u32> {
+fn match_current_pid() -> Result<bool, u32> {
     let target = TARGET_PID.get(0).ok_or(1u32)?;
-    let current_pid = (bpf_get_current_pid_tgid() >> 32) as u32;
+    let (pid, _) = common::thread_id();
+    Ok(pid == target.pid)
+}
 
-    Ok(current_pid == target.pid)
+fn not_match_current_pid() -> Result<bool, u32> {
+    let target = TARGET_PID.get(0).ok_or(1u32)?;
+    let (pid, _) = common::thread_id();
+    Ok(pid == target.pid)
 }
 
 ///
@@ -270,7 +275,7 @@ pub fn tcp_v4_connect(ctx: ProbeContext) -> u32 {
 }
 
 fn try_tcp_v4_connect(ctx: ProbeContext) -> Result<u32, u64> {
-    if !matches_tcp_sendmsg_target()? {
+    if !match_current_pid()? {
         return Ok(0);
     }
     let sock = ctx.arg::<u64>(0).ok_or(1u64)?;
@@ -487,79 +492,6 @@ pub fn tcp_send_reset(ctx: TracePointContext) -> u32 {
 }
 
 fn try_tcp_send_reset(ctx: TracePointContext) -> Result<u32, i64> {
-    let state: i32 = unsafe { ctx.read_at::<i32>(32).map_err(|err| err)? };
-    let sport: u16 = unsafe { ctx.read_at::<u16>(36).map_err(|err| err)? };
-    let dport: u16 = unsafe { ctx.read_at::<u16>(38).map_err(|err| err)? };
-    let family: u16 = unsafe { ctx.read_at::<u16>(40).map_err(|err| err)? };
-    let pid_tgid = bpf_get_current_pid_tgid();
-    let pid = (pid_tgid >> 32) as u32;
-    let tid = pid_tgid as u32;
-
-    if family == AF_INET {
-        let saddr: [u8; 4] = unsafe { ctx.read_at::<[u8; 4]>(42).map_err(|err| err)? };
-        let daddr: [u8; 4] = unsafe { ctx.read_at::<[u8; 4]>(46).map_err(|err| err)? };
-
-        info!(
-            &ctx,
-            "tcp_send_reset的信息为:pid:{} tid:{} state:{} family:{} source:{}.{}.{}.{}:{} dst:{}.{}.{}.{}:{}",
-            pid,
-            tid,
-            state,
-            family,
-            saddr[0],
-            saddr[1],
-            saddr[2],
-            saddr[3],
-            sport,
-            daddr[0],
-            daddr[1],
-            daddr[2],
-            daddr[3],
-            dport,
-        );
-    } else if family == AF_INET6 {
-        let saddr_v6: [u8; 16] = unsafe { ctx.read_at::<[u8; 16]>(50).map_err(|err| err)? };
-        let daddr_v6: [u8; 16] = unsafe { ctx.read_at::<[u8; 16]>(66).map_err(|err| err)? };
-
-        info!(
-            &ctx,
-            "tcp_send_reset的信息为:pid:{} tid:{} state:{} family:{} source:{:x}:{:x}:{:x}:{:x}:{:x}:{:x}:{:x}:{:x}:{} dst:{:x}:{:x}:{:x}:{:x}:{:x}:{:x}:{:x}:{:x}:{}",
-            pid,
-            tid,
-            state,
-            family,
-            u16::from_be_bytes([saddr_v6[0], saddr_v6[1]]),
-            u16::from_be_bytes([saddr_v6[2], saddr_v6[3]]),
-            u16::from_be_bytes([saddr_v6[4], saddr_v6[5]]),
-            u16::from_be_bytes([saddr_v6[6], saddr_v6[7]]),
-            u16::from_be_bytes([saddr_v6[8], saddr_v6[9]]),
-            u16::from_be_bytes([saddr_v6[10], saddr_v6[11]]),
-            u16::from_be_bytes([saddr_v6[12], saddr_v6[13]]),
-            u16::from_be_bytes([saddr_v6[14], saddr_v6[15]]),
-            sport,
-            u16::from_be_bytes([daddr_v6[0], daddr_v6[1]]),
-            u16::from_be_bytes([daddr_v6[2], daddr_v6[3]]),
-            u16::from_be_bytes([daddr_v6[4], daddr_v6[5]]),
-            u16::from_be_bytes([daddr_v6[6], daddr_v6[7]]),
-            u16::from_be_bytes([daddr_v6[8], daddr_v6[9]]),
-            u16::from_be_bytes([daddr_v6[10], daddr_v6[11]]),
-            u16::from_be_bytes([daddr_v6[12], daddr_v6[13]]),
-            u16::from_be_bytes([daddr_v6[14], daddr_v6[15]]),
-            dport,
-        );
-    } else {
-        info!(
-            &ctx,
-            "tcp_send_reset的信息为:pid:{} tid:{} state:{} family:{} sport:{} dport:{}",
-            pid,
-            tid,
-            state,
-            family,
-            sport,
-            dport,
-        );
-    }
-
     Ok(0)
 }
 
@@ -579,5 +511,20 @@ pub fn tcp_send_active_reset(ctx: ProbeContext) -> u32 {
 }
 
 fn try_tcp_send_active_reset(ctx: ProbeContext) -> Result<u32, i64> {
+    if not_match_current_pid()? {
+        return Ok(0);
+    }
+
+    let sock = ctx.arg::<*const sock>(0).ok_or(-1)?;
+    unsafe {
+        let sock = bpf_probe_read_kernel(sock)?;
+        let sock_common = sock.__sk_common;
+        info!(
+            &ctx,
+            "tcp_send_active_reset输出tcp reset信息 family:{} state:{}",
+            sock_common.skc_family,
+            sock_common.skc_state
+        );
+    }
     Ok(0)
 }
