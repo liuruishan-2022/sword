@@ -79,6 +79,7 @@ fn spawn_target_pid_refresh(mut target_map: Array<MapData, TargetPid>, option: L
         let mut interval = time::interval(Duration::from_secs(5));
         let mut current_pid = 0;
         loop {
+            info!("执行刷新任务，刷新的命令是:{}!", option.command());
             interval.tick().await;
             let new_pid = option.first_target_pid().unwrap_or(0);
 
