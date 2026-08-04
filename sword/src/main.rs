@@ -1,5 +1,3 @@
-use std::fmt::Arguments;
-
 #[rustfmt::skip]
 use log::{debug, warn};
 use clap::Parser;
@@ -12,7 +10,7 @@ pub mod metrics;
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
-    let options = Arguments::parse();
+    let options = args::arguments::LoadOptions::parse();
 
     let rlim = libc::rlimit {
         rlim_cur: libc::RLIM_INFINITY,

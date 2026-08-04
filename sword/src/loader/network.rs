@@ -1,3 +1,4 @@
+use crate::args::arguments::LoadOptions;
 ///
 /// 放置网络相关的loader
 ///
@@ -5,17 +6,17 @@ use aya::maps::Array;
 use log::info;
 use sword_common::TargetPid;
 
-use crate::loader::{KProberConfig, LoaderOptions, TracePointConfig};
+use crate::loader::{KProberConfig, TracePointConfig};
 
 const TARGET_PID: &str = "TARGET_PID";
 
-pub fn load_network_kprobe(ebpf: &mut aya::Ebpf, options: &LoaderOptions) -> anyhow::Result<()> {
+pub fn load_network_kprobe(ebpf: &mut aya::Ebpf, options: &LoadOptions) -> anyhow::Result<()> {
     let kprobe_configs = vec![
         // KProberConfig::new("tcp_sendmsg", "tcp_sendmsg"),
         KProberConfig::new("tcp_v4_connect", "tcp_v4_connect"),
         KProberConfig::new("tcp_send_active_reset", "tcp_send_active_reset"),
     ];
-    if let Some(pid) = options.tcp_sendmsg_pid {
+    if let Some(pid) = options.first_target_pid() {
         configure_tcp_sendmsg_target(ebpf, pid)?;
         for ele in kprobe_configs {
             ele.load_kprobe(ebpf)?;

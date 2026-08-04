@@ -32,6 +32,7 @@ log = { version = "0.4.22", default-features = false }
 prometheus-client = { version = "0.24.1", default-features = false }
 tokio = { version = "1.40.0", default-features = false }
 which = { version = "6.0.0", default-features = false }
+walkdir = "2.5.0"
 
 [profile.release.package.sword-ebpf]
 debug = 2

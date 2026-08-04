@@ -1656,6 +1656,7 @@ dependencies = [
  "sword-common",
  "sword-ebpf",
  "tokio",
+ "walkdir",
 ]
 
 [[package]]

@@ -1,3 +1,4 @@
+use crate::args::arguments::LoadOptions;
 use aya::{
     Ebpf,
     programs::{KProbe, TracePoint},
@@ -23,7 +24,7 @@ fn load_tracepoint(ebpf: &mut aya::Ebpf) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn load_kprobe(ebpf: &mut aya::Ebpf, options: &LoaderOptions) -> anyhow::Result<()> {
+fn load_kprobe(ebpf: &mut aya::Ebpf, options: &LoadOptions) -> anyhow::Result<()> {
     network::load_network_kprobe(ebpf, options)?;
     Ok(())
 }
@@ -31,7 +32,7 @@ fn load_kprobe(ebpf: &mut aya::Ebpf, options: &LoaderOptions) -> anyhow::Result<
 ///
 /// 加载ebpf的信息模块
 ///
-pub fn load_ebpf(ebpf: &mut aya::Ebpf, options: &LoaderOptions) -> anyhow::Result<()> {
+pub fn load_ebpf(ebpf: &mut aya::Ebpf, options: &LoadOptions) -> anyhow::Result<()> {
     load_tracepoint(ebpf)?;
     load_kprobe(ebpf, options)?;
     Ok(())
