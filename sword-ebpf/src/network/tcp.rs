@@ -10,76 +10,20 @@ use crate::{
 /// 发送数据: sys_enter_write->tcp_sendmsg->tcp_write_xmit->tcp_transmit_skb->ip_queue_xmit->dev_queue_xmit
 ///
 use aya_ebpf::{
-    bindings::{BPF_TCP_CLOSE, BPF_TCP_ESTABLISHED, BPF_TCP_SYN_SENT, sockaddr},
+    bindings::{BPF_TCP_ESTABLISHED, BPF_TCP_SYN_SENT, sockaddr},
     helpers::{
         bpf_get_current_pid_tgid, bpf_probe_read_kernel, bpf_probe_read_user,
-        bpf_probe_read_user_buf, generated::bpf_ktime_get_ns,
+        generated::bpf_ktime_get_ns,
     },
-    macros::{kprobe, kretprobe, map, tracepoint},
-    maps::{Array, HashMap, LruHashMap, PerCpuArray, PerCpuHashMap, RingBuf},
-    programs::{ProbeContext, RetProbeContext, TracePointContext},
+    macros::{kprobe, map, tracepoint},
+    maps::{Array, HashMap, PerCpuHashMap},
+    programs::{ProbeContext, TracePointContext},
 };
-use sword_common::{
-    HTTP_PAYLOAD_CHUNK_MAX_LEN, HTTP_PAYLOAD_DIRECTION_REQUEST, HTTP_PAYLOAD_DIRECTION_RESPONSE,
-    HttpPayloadEvent, HttpRequestId, RequestTimings, SLOW_TCP_PHASE_ARRIVAL_TO_EPOLL,
-    SLOW_TCP_PHASE_ARRIVAL_TO_READ, SLOW_TCP_PHASE_ARRIVAL_TO_WRITE, SLOW_TCP_PHASE_EPOLL_TO_RECV,
-    SLOW_TCP_PHASE_READ_TO_WRITE, SLOW_TCP_PHASE_RECV_DURATION, SlowTcpEvent, SysEnterType,
-    TargetPid, http_request_capture_lengths, is_slow_http, should_trace_http,
-};
+use aya_log_ebpf::info;
+use sword_common::{SysEnterType, TargetPid};
 
 const AF_INET: u16 = 2;
 const AF_INET6: u16 = 10;
-const RISK_TCP_RETRANSMIT_INDEX: u32 = 0;
-const RISK_TCP_RECEIVE_RESET_INDEX: u32 = 1;
-const RISK_TCP_SEND_RESET_INDEX: u32 = 2;
-const RISK_TCP_READ_INDEX: u32 = 3;
-const RISK_TCP_WRITE_INDEX: u32 = 4;
-const RISK_TCP_SLOW_INDEX: u32 = 5;
-const RISK_TCP_EVENT_DROPPED_INDEX: u32 = 6;
-const RISK_TCP_PAYLOAD_ARRIVAL_INDEX: u32 = 7;
-const RISK_TCP_ARRIVAL_TO_READ_INDEX: u32 = 8;
-const RISK_TCP_ARRIVAL_TO_READ_SLOW_INDEX: u32 = 9;
-const RISK_TCP_ARRIVAL_TO_EPOLL_LATENCY_NS_INDEX: u32 = 10;
-const RISK_TCP_ARRIVAL_TO_EPOLL_SLOW_INDEX: u32 = 11;
-const RISK_TCP_EPOLL_TO_RECV_LATENCY_NS_INDEX: u32 = 12;
-const RISK_TCP_EPOLL_TO_RECV_SLOW_INDEX: u32 = 13;
-const RISK_TCP_RECV_DURATION_NS_INDEX: u32 = 14;
-const RISK_TCP_RECV_DURATION_SLOW_INDEX: u32 = 15;
-const SYSCALL_IO_DIRECT: u8 = 1;
-const SYSCALL_IO_VECTOR: u8 = 2;
-const SYSCALL_IO_MESSAGE: u8 = 3;
-const USER_IOVEC_SIZE: u64 = 16;
-const USER_MSGHDR_IOV_OFFSET: u64 = 16;
-const USER_MSGHDR_IOVLEN_OFFSET: u64 = 24;
-
-#[repr(C)]
-#[derive(Clone, Copy)]
-pub struct TcpRecvInflight {
-    socket_key: u64,
-    recv_enter_ns: u64,
-    epoll_exit_ns: u64,
-}
-
-#[repr(C)]
-#[derive(Clone, Copy)]
-pub struct SyscallIoInflight {
-    socket_key: u64,
-    data_ptr: u64,
-    data_len: u64,
-    fd: u64,
-    kind: u8,
-    capture_payload: u8,
-    _pad: [u8; 6],
-}
-
-#[repr(C)]
-#[derive(Clone, Copy)]
-pub struct TcpRequestContext {
-    arrival_ns: u64,
-    epoll_exit_ns: u64,
-    recv_enter_ns: u64,
-    read_ns: u64,
-}
 
 #[map]
 pub static TARGET_PID: Array<TargetPid> = Array::with_max_entries(1, 0);
@@ -89,44 +33,6 @@ pub static SYS_ENTER_CONNECT: PerCpuHashMap<u32, u64> = PerCpuHashMap::with_max_
 
 #[map]
 pub static START: HashMap<u64, u64> = HashMap::with_max_entries(4096, 0);
-
-#[map]
-pub static RISK_TCP_COUNTERS: PerCpuArray<u64> = PerCpuArray::with_max_entries(16, 0);
-
-#[map]
-pub static TCP_RECV_INFLIGHT: HashMap<u32, TcpRecvInflight> = HashMap::with_max_entries(4096, 0);
-
-#[map]
-pub static HTTP_READ_INFLIGHT: HashMap<u64, SyscallIoInflight> = HashMap::with_max_entries(4096, 0);
-
-#[map]
-pub static HTTP_WRITE_INFLIGHT: HashMap<u64, SyscallIoInflight> =
-    HashMap::with_max_entries(4096, 0);
-
-#[map]
-pub static EPOLL_WAIT_ENTER_NS: HashMap<u32, u64> = HashMap::with_max_entries(4096, 0);
-
-#[map]
-pub static EPOLL_EVENT_EXIT_NS: HashMap<u32, u64> = HashMap::with_max_entries(4096, 0);
-
-#[map]
-pub static HTTP_PAYLOAD_BUFFER: PerCpuArray<HttpPayloadEvent> = PerCpuArray::with_max_entries(1, 0);
-
-#[map]
-pub static HTTP_REQUEST_HEADS: LruHashMap<u64, HttpPayloadEvent> =
-    LruHashMap::with_max_entries(8192, 0);
-
-#[map]
-pub static TCP_REQUEST_START: HashMap<u64, TcpRequestContext> = HashMap::with_max_entries(32768, 0);
-
-#[map]
-pub static TCP_PAYLOAD_ARRIVAL: LruHashMap<u64, u64> = LruHashMap::with_max_entries(32768, 0);
-
-#[map]
-pub static TCP_ACTIVE_FLOWS: LruHashMap<u64, u8> = LruHashMap::with_max_entries(32768, 0);
-
-#[map]
-pub static SLOW_TCP_EVENTS: RingBuf = RingBuf::with_byte_size(256 * 1024, 0);
 
 ///
 /// 这个主要是统计我们的SYS_ENTER的调用统计
@@ -166,131 +72,57 @@ pub fn tcp_sendmsg(ctx: ProbeContext) -> u32 {
 }
 
 fn try_tcp_sendmsg(ctx: ProbeContext) -> Result<u32, u32> {
+    if !matches_tcp_sendmsg_target()? {
+        return Ok(0);
+    }
+
     let sk: *const sock = ctx.arg(0).ok_or(1u32)?;
-    let tuple = read_target_server_socket_tuple(sk)?;
-    let socket_key = sk as u64;
-    let _ = TCP_ACTIVE_FLOWS.remove(&socket_key);
-    increment_risk_tcp_counter(RISK_TCP_WRITE_INDEX);
+    let size: usize = ctx.arg(2).ok_or(1u32)?;
+    let tuple = read_tcp_socket_tuple(sk)?;
 
-    let Some(request) = (unsafe { TCP_REQUEST_START.get(&socket_key) }).copied() else {
-        link_write_syscall_socket(socket_key, false);
-        let _ = HTTP_REQUEST_HEADS.remove(&socket_key);
-        return Ok(0);
-    };
-    let _ = TCP_REQUEST_START.remove(&socket_key);
-
-    let now_ns = unsafe { bpf_ktime_get_ns() };
-    let read_to_write_ns = now_ns.saturating_sub(request.read_ns);
-    let Some(config) = crate::common::risk_target_config() else {
-        link_write_syscall_socket(socket_key, false);
-        let _ = HTTP_REQUEST_HEADS.remove(&socket_key);
-        return Ok(0);
-    };
-    if read_to_write_ns >= config.slow_threshold_ns {
-        increment_risk_tcp_counter(RISK_TCP_SLOW_INDEX);
-        output_slow_tcp_event(
-            &tuple,
-            now_ns,
-            read_to_write_ns,
-            SLOW_TCP_PHASE_READ_TO_WRITE,
-        );
+    match tuple.family {
+        AF_INET => info!(
+            &ctx,
+            "tcp_sendmsg pid={} tid={} family=ipv4 src={}.{}.{}.{}:{} dst={}.{}.{}.{}:{} size={}",
+            tuple.pid,
+            tuple.tid,
+            ipv4_octet(tuple.saddr_v4, 0),
+            ipv4_octet(tuple.saddr_v4, 1),
+            ipv4_octet(tuple.saddr_v4, 2),
+            ipv4_octet(tuple.saddr_v4, 3),
+            tuple.sport,
+            ipv4_octet(tuple.daddr_v4, 0),
+            ipv4_octet(tuple.daddr_v4, 1),
+            ipv4_octet(tuple.daddr_v4, 2),
+            ipv4_octet(tuple.daddr_v4, 3),
+            tuple.dport,
+            size
+        ),
+        AF_INET6 => info!(
+            &ctx,
+            "tcp_sendmsg pid={} tid={} family=ipv6 src={:x}:{:x}:{:x}:{:x}:{} dst={:x}:{:x}:{:x}:{:x}:{} size={}",
+            tuple.pid,
+            tuple.tid,
+            tuple.saddr_v6[0],
+            tuple.saddr_v6[1],
+            tuple.saddr_v6[2],
+            tuple.saddr_v6[3],
+            tuple.sport,
+            tuple.daddr_v6[0],
+            tuple.daddr_v6[1],
+            tuple.daddr_v6[2],
+            tuple.daddr_v6[3],
+            tuple.dport,
+            size
+        ),
+        _ => info!(
+            &ctx,
+            "tcp_sendmsg pid={} tid={} family={} size={}", tuple.pid, tuple.tid, tuple.family, size
+        ),
     }
-
-    let timings = RequestTimings::from_phase_timestamps(
-        request.arrival_ns,
-        request.epoll_exit_ns,
-        request.recv_enter_ns,
-        request.read_ns,
-        now_ns,
-    );
-    let http_request_latency_ns = timings.http_request_latency_ns();
-    let slow_http = is_slow_http(http_request_latency_ns, config.slow_threshold_ns);
-    let trace_http = should_trace_http(
-        config.flags,
-        http_request_latency_ns,
-        config.slow_threshold_ns,
-    );
-    link_write_syscall_socket(socket_key, trace_http);
-    if trace_http {
-        output_http_request_payload(socket_key);
-    }
-    if slow_http {
-        output_slow_http_event(&tuple, socket_key, now_ns, timings);
-    }
-    let _ = HTTP_REQUEST_HEADS.remove(&socket_key);
 
     Ok(0)
 }
-
-#[tracepoint]
-pub fn sys_enter_epoll_wait(ctx: TracePointContext) -> u32 {
-    match try_sys_enter_epoll_wait(ctx) {
-        Ok(ret) => ret,
-        Err(ret) => ret as u32,
-    }
-}
-
-#[tracepoint]
-pub fn sys_enter_epoll_pwait(ctx: TracePointContext) -> u32 {
-    match try_sys_enter_epoll_wait(ctx) {
-        Ok(ret) => ret,
-        Err(ret) => ret as u32,
-    }
-}
-
-fn try_sys_enter_epoll_wait(_ctx: TracePointContext) -> Result<u32, i64> {
-    let (tgid, tid) = common::thread_id();
-    if !common::is_risk_target_tgid(tgid) {
-        return Ok(0);
-    }
-
-    let now_ns = unsafe { bpf_ktime_get_ns() };
-    let _ = EPOLL_EVENT_EXIT_NS.remove(&tid);
-    if EPOLL_WAIT_ENTER_NS.insert(&tid, &now_ns, 0).is_err() {
-        increment_risk_tcp_counter(RISK_TCP_EVENT_DROPPED_INDEX);
-    }
-    Ok(0)
-}
-
-#[tracepoint]
-pub fn sys_exit_epoll_wait(ctx: TracePointContext) -> u32 {
-    match try_sys_exit_epoll_wait(ctx) {
-        Ok(ret) => ret,
-        Err(ret) => ret as u32,
-    }
-}
-
-#[tracepoint]
-pub fn sys_exit_epoll_pwait(ctx: TracePointContext) -> u32 {
-    match try_sys_exit_epoll_wait(ctx) {
-        Ok(ret) => ret,
-        Err(ret) => ret as u32,
-    }
-}
-
-fn try_sys_exit_epoll_wait(ctx: TracePointContext) -> Result<u32, i64> {
-    let (tgid, tid) = common::thread_id();
-    if !common::is_risk_target_tgid(tgid) {
-        return Ok(0);
-    }
-    if unsafe { EPOLL_WAIT_ENTER_NS.get(&tid).is_none() } {
-        return Ok(0);
-    }
-    let _ = EPOLL_WAIT_ENTER_NS.remove(&tid);
-
-    let ready: i64 = unsafe { ctx.read_at(16)? };
-    if ready <= 0 {
-        let _ = EPOLL_EVENT_EXIT_NS.remove(&tid);
-        return Ok(0);
-    }
-
-    let now_ns = unsafe { bpf_ktime_get_ns() };
-    if EPOLL_EVENT_EXIT_NS.insert(&tid, &now_ns, 0).is_err() {
-        increment_risk_tcp_counter(RISK_TCP_EVENT_DROPPED_INDEX);
-    }
-    Ok(0)
-}
-
 struct TcpSocketTuple {
     pid: u32,
     tid: u32,
@@ -301,79 +133,6 @@ struct TcpSocketTuple {
     daddr_v6: [u32; 4],
     sport: u16,
     dport: u16,
-}
-
-fn output_slow_tcp_event(tuple: &TcpSocketTuple, timestamp_ns: u64, latency_ns: u64, phase: u8) {
-    let event = SlowTcpEvent {
-        timestamp_ns,
-        latency_ns,
-        arrival_to_epoll_ns: 0,
-        epoll_to_recv_ns: 0,
-        recv_duration_ns: 0,
-        arrival_to_read_ns: 0,
-        read_to_write_ns: 0,
-        socket_key: 0,
-        tgid: tuple.pid,
-        tid: tuple.tid,
-        source_addr_v4: tuple.saddr_v4,
-        destination_addr_v4: tuple.daddr_v4,
-        source_port: tuple.sport,
-        destination_port: tuple.dport,
-        family: tuple.family,
-        phase,
-        _pad: 0,
-        request_id: HttpRequestId::default(),
-    };
-    if SLOW_TCP_EVENTS.output::<SlowTcpEvent>(&event, 0).is_err() {
-        increment_risk_tcp_counter(RISK_TCP_EVENT_DROPPED_INDEX);
-    }
-}
-
-fn output_slow_http_event(
-    tuple: &TcpSocketTuple,
-    socket_key: u64,
-    timestamp_ns: u64,
-    timings: RequestTimings,
-) {
-    let event = SlowTcpEvent {
-        timestamp_ns,
-        latency_ns: timings.http_request_latency_ns(),
-        arrival_to_epoll_ns: timings.arrival_to_epoll_ns,
-        epoll_to_recv_ns: timings.epoll_to_recv_ns,
-        recv_duration_ns: timings.recv_duration_ns,
-        arrival_to_read_ns: timings.arrival_to_read_ns,
-        read_to_write_ns: timings.read_to_write_ns,
-        socket_key,
-        tgid: tuple.pid,
-        tid: tuple.tid,
-        source_addr_v4: tuple.saddr_v4,
-        destination_addr_v4: tuple.daddr_v4,
-        source_port: tuple.sport,
-        destination_port: tuple.dport,
-        family: tuple.family,
-        phase: SLOW_TCP_PHASE_ARRIVAL_TO_WRITE,
-        _pad: 0,
-        request_id: HttpRequestId::default(),
-    };
-    if SLOW_TCP_EVENTS.output::<SlowTcpEvent>(&event, 0).is_err() {
-        increment_risk_tcp_counter(RISK_TCP_EVENT_DROPPED_INDEX);
-    }
-}
-
-fn output_http_request_payload(socket_key: u64) {
-    let Some(request) = (unsafe { HTTP_REQUEST_HEADS.get(&socket_key) }) else {
-        return;
-    };
-    output_http_payload(request);
-}
-
-fn output_http_payload(payload: &HttpPayloadEvent) {
-    if SLOW_TCP_EVENTS
-        .output::<HttpPayloadEvent>(payload, 0)
-        .is_err()
-    {
-        increment_risk_tcp_counter(RISK_TCP_EVENT_DROPPED_INDEX);
-    }
 }
 
 fn read_tcp_socket_tuple(sk: *const sock) -> Result<TcpSocketTuple, u32> {
@@ -415,23 +174,8 @@ fn read_tcp_socket_tuple(sk: *const sock) -> Result<TcpSocketTuple, u32> {
     Ok(tuple)
 }
 
-fn read_target_server_socket_tuple(sk: *const sock) -> Result<TcpSocketTuple, u32> {
-    let current_tgid = (bpf_get_current_pid_tgid() >> 32) as u32;
-    if !crate::common::is_risk_target_tgid(current_tgid) {
-        return Err(1);
-    }
-    read_server_socket_tuple(sk)
-}
-
-fn read_server_socket_tuple(sk: *const sock) -> Result<TcpSocketTuple, u32> {
-    let Some(config) = crate::common::risk_target_config() else {
-        return Err(1);
-    };
-    let tuple = read_tcp_socket_tuple(sk)?;
-    if tuple.sport != config.server_port {
-        return Err(1);
-    }
-    Ok(tuple)
+fn ipv4_octet(addr: u32, index: u32) -> u32 {
+    (addr >> (24 - index * 8)) & 0xff
 }
 
 fn matches_tcp_sendmsg_target() -> Result<bool, u32> {
@@ -584,35 +328,6 @@ fn try_sys_exit_socket(ctx: TracePointContext) -> Result<u32, i64> {
     Ok(0)
 }
 
-/// Record when payload enters the target server socket. Using the socket
-/// pointer as the key avoids kernel-dependent IPv6 flow tuple layouts.
-#[kprobe]
-pub fn tcp_data_queue(ctx: ProbeContext) -> u32 {
-    match try_tcp_data_queue(ctx) {
-        Ok(ret) => ret,
-        Err(err) => err as u32,
-    }
-}
-
-fn try_tcp_data_queue(ctx: ProbeContext) -> Result<u32, i64> {
-    let sk: *const sock = ctx.arg(0).ok_or(1i64)?;
-    read_server_socket_tuple(sk).map_err(|_| 1i64)?;
-    let socket_key = sk as u64;
-    increment_risk_tcp_counter(RISK_TCP_PAYLOAD_ARRIVAL_INDEX);
-
-    if unsafe { TCP_ACTIVE_FLOWS.get(&socket_key) }.is_some()
-        || unsafe { TCP_PAYLOAD_ARRIVAL.get(&socket_key) }.is_some()
-    {
-        return Ok(0);
-    }
-
-    let now_ns = unsafe { bpf_ktime_get_ns() };
-    if TCP_PAYLOAD_ARRIVAL.insert(&socket_key, &now_ns, 0).is_err() {
-        increment_risk_tcp_counter(RISK_TCP_EVENT_DROPPED_INDEX);
-    }
-    Ok(0)
-}
-
 ///
 /// 抓取tcp_recvmsg这个krprobe
 /// kfunc:vmlinux:tcp_recvmsg
@@ -633,545 +348,10 @@ pub fn tcp_recvmsg(ctx: ProbeContext) -> u32 {
 }
 
 fn try_tcp_recvmsg(ctx: ProbeContext) -> Result<u32, i64> {
-    let sk: *const sock = ctx.arg(0).ok_or(1i64)?;
-    read_target_server_socket_tuple(sk).map_err(|_| 1i64)?;
-    let socket_key = sk as u64;
-    link_read_syscall_socket(socket_key);
-    let tid = bpf_get_current_pid_tgid() as u32;
-    let recv_enter_ns = unsafe { bpf_ktime_get_ns() };
-    let epoll_exit_ns = unsafe { EPOLL_EVENT_EXIT_NS.get(&tid) }
-        .copied()
-        .unwrap_or(0);
-    let inflight = TcpRecvInflight {
-        socket_key,
-        recv_enter_ns,
-        epoll_exit_ns,
-    };
-    if TCP_RECV_INFLIGHT.insert(&tid, &inflight, 0).is_err() {
-        increment_risk_tcp_counter(RISK_TCP_EVENT_DROPPED_INDEX);
-    }
-    Ok(0)
-}
-
-#[kretprobe]
-pub fn tcp_recvmsg_ret(ctx: RetProbeContext) -> u32 {
-    match try_tcp_recvmsg_ret(ctx) {
-        Ok(ret) => ret,
-        Err(err) => err as u32,
-    }
-}
-
-fn try_tcp_recvmsg_ret(ctx: RetProbeContext) -> Result<u32, i64> {
-    let tid = bpf_get_current_pid_tgid() as u32;
-    let Some(inflight) = (unsafe { TCP_RECV_INFLIGHT.get(&tid) }).copied() else {
-        return Ok(0);
-    };
-    let _ = TCP_RECV_INFLIGHT.remove(&tid);
-
-    let bytes_read: i64 = ctx.ret();
-    if bytes_read <= 0 {
-        return Ok(0);
-    }
-
-    let socket_key = inflight.socket_key;
-    let sk = socket_key as *const sock;
-    let tuple = read_target_server_socket_tuple(sk).map_err(|_| 1i64)?;
-    let existing = unsafe { TCP_REQUEST_START.get(&socket_key) }.copied();
-    let first_read = existing.is_none();
-    let now_ns = unsafe { bpf_ktime_get_ns() };
-    let request = existing.unwrap_or_else(|| {
-        let arrival_ns = unsafe { TCP_PAYLOAD_ARRIVAL.get(&socket_key) }
-            .copied()
-            .unwrap_or(0);
-        TcpRequestContext {
-            arrival_ns,
-            epoll_exit_ns: inflight.epoll_exit_ns,
-            recv_enter_ns: inflight.recv_enter_ns,
-            read_ns: now_ns,
-        }
-    });
-    if TCP_REQUEST_START.insert(&socket_key, &request, 0).is_err() {
-        increment_risk_tcp_counter(RISK_TCP_EVENT_DROPPED_INDEX);
-    }
-    increment_risk_tcp_counter(RISK_TCP_READ_INDEX);
-
-    if !first_read {
-        return Ok(0);
-    }
-    if TCP_ACTIVE_FLOWS.insert(&socket_key, &1, 0).is_err() {
-        increment_risk_tcp_counter(RISK_TCP_EVENT_DROPPED_INDEX);
-    }
-
-    let _ = TCP_PAYLOAD_ARRIVAL.remove(&socket_key);
-    if request.arrival_ns == 0 {
-        return Ok(0);
-    }
-
-    increment_risk_tcp_counter(RISK_TCP_ARRIVAL_TO_READ_INDEX);
-    let latency_ns = now_ns.saturating_sub(request.arrival_ns);
-    let Some(config) = crate::common::risk_target_config() else {
-        return Ok(0);
-    };
-    if latency_ns >= config.slow_threshold_ns {
-        increment_risk_tcp_counter(RISK_TCP_ARRIVAL_TO_READ_SLOW_INDEX);
-        output_slow_tcp_event(&tuple, now_ns, latency_ns, SLOW_TCP_PHASE_ARRIVAL_TO_READ);
-    }
-    record_recv_phase_metrics(
-        &tuple,
-        now_ns,
-        RequestTimings::from_phase_timestamps(
-            request.arrival_ns,
-            request.epoll_exit_ns,
-            request.recv_enter_ns,
-            request.read_ns,
-            request.read_ns,
-        ),
-        config.slow_threshold_ns,
-    );
-    Ok(0)
-}
-
-fn record_recv_phase_metrics(
-    tuple: &TcpSocketTuple,
-    timestamp_ns: u64,
-    timings: RequestTimings,
-    slow_threshold_ns: u64,
-) {
-    add_risk_tcp_counter(
-        RISK_TCP_ARRIVAL_TO_EPOLL_LATENCY_NS_INDEX,
-        timings.arrival_to_epoll_ns,
-    );
-    if timings.arrival_to_epoll_ns >= slow_threshold_ns {
-        increment_risk_tcp_counter(RISK_TCP_ARRIVAL_TO_EPOLL_SLOW_INDEX);
-        output_slow_tcp_event(
-            tuple,
-            timestamp_ns,
-            timings.arrival_to_epoll_ns,
-            SLOW_TCP_PHASE_ARRIVAL_TO_EPOLL,
-        );
-    }
-    add_risk_tcp_counter(
-        RISK_TCP_EPOLL_TO_RECV_LATENCY_NS_INDEX,
-        timings.epoll_to_recv_ns,
-    );
-    if timings.epoll_to_recv_ns >= slow_threshold_ns {
-        increment_risk_tcp_counter(RISK_TCP_EPOLL_TO_RECV_SLOW_INDEX);
-        output_slow_tcp_event(
-            tuple,
-            timestamp_ns,
-            timings.epoll_to_recv_ns,
-            SLOW_TCP_PHASE_EPOLL_TO_RECV,
-        );
-    }
-    add_risk_tcp_counter(RISK_TCP_RECV_DURATION_NS_INDEX, timings.recv_duration_ns);
-    if timings.recv_duration_ns >= slow_threshold_ns {
-        increment_risk_tcp_counter(RISK_TCP_RECV_DURATION_SLOW_INDEX);
-        output_slow_tcp_event(
-            tuple,
-            timestamp_ns,
-            timings.recv_duration_ns,
-            SLOW_TCP_PHASE_RECV_DURATION,
-        );
-    }
-}
-
-#[tracepoint]
-pub fn sys_enter_read(ctx: TracePointContext) -> u32 {
-    begin_read_syscall(ctx, SYSCALL_IO_DIRECT)
-}
-
-#[tracepoint]
-pub fn sys_enter_readv(ctx: TracePointContext) -> u32 {
-    begin_read_syscall(ctx, SYSCALL_IO_VECTOR)
-}
-
-#[tracepoint]
-pub fn sys_enter_recvfrom(ctx: TracePointContext) -> u32 {
-    begin_read_syscall(ctx, SYSCALL_IO_DIRECT)
-}
-
-#[tracepoint]
-pub fn sys_enter_recvmsg(ctx: TracePointContext) -> u32 {
-    begin_read_syscall(ctx, SYSCALL_IO_MESSAGE)
-}
-
-#[tracepoint]
-pub fn sys_enter_write(ctx: TracePointContext) -> u32 {
-    begin_write_syscall(ctx, SYSCALL_IO_DIRECT)
-}
-
-#[tracepoint]
-pub fn sys_enter_writev(ctx: TracePointContext) -> u32 {
-    begin_write_syscall(ctx, SYSCALL_IO_VECTOR)
-}
-
-#[tracepoint]
-pub fn sys_enter_sendto(ctx: TracePointContext) -> u32 {
-    begin_write_syscall(ctx, SYSCALL_IO_DIRECT)
-}
-
-#[tracepoint]
-pub fn sys_enter_sendmsg(ctx: TracePointContext) -> u32 {
-    begin_write_syscall(ctx, SYSCALL_IO_MESSAGE)
-}
-
-#[tracepoint]
-pub fn sys_exit_read(ctx: TracePointContext) -> u32 {
-    finish_read_syscall(ctx)
-}
-
-#[tracepoint]
-pub fn sys_exit_readv(ctx: TracePointContext) -> u32 {
-    finish_read_syscall(ctx)
-}
-
-#[tracepoint]
-pub fn sys_exit_recvfrom(ctx: TracePointContext) -> u32 {
-    finish_read_syscall(ctx)
-}
-
-#[tracepoint]
-pub fn sys_exit_recvmsg(ctx: TracePointContext) -> u32 {
-    finish_read_syscall(ctx)
-}
-
-#[tracepoint]
-pub fn sys_exit_write(ctx: TracePointContext) -> u32 {
-    finish_write_syscall(ctx)
-}
-
-#[tracepoint]
-pub fn sys_exit_writev(ctx: TracePointContext) -> u32 {
-    finish_write_syscall(ctx)
-}
-
-#[tracepoint]
-pub fn sys_exit_sendto(ctx: TracePointContext) -> u32 {
-    finish_write_syscall(ctx)
-}
-
-#[tracepoint]
-pub fn sys_exit_sendmsg(ctx: TracePointContext) -> u32 {
-    finish_write_syscall(ctx)
-}
-
-fn begin_read_syscall(ctx: TracePointContext, kind: u8) -> u32 {
-    match begin_syscall_io(&ctx, kind, false) {
-        Ok(()) => 0,
-        Err(err) => err as u32,
-    }
-}
-
-fn begin_write_syscall(ctx: TracePointContext, kind: u8) -> u32 {
-    match begin_syscall_io(&ctx, kind, true) {
-        Ok(()) => 0,
-        Err(err) => err as u32,
-    }
-}
-
-fn begin_syscall_io(ctx: &TracePointContext, kind: u8, write: bool) -> Result<(), i64> {
-    let pid_tgid = bpf_get_current_pid_tgid();
-    let tgid = (pid_tgid >> 32) as u32;
-    if !common::is_risk_target_tgid(tgid) {
-        return Ok(());
-    }
-
-    let inflight = SyscallIoInflight {
-        socket_key: 0,
-        fd: unsafe { ctx.read_at::<u64>(16)? },
-        data_ptr: unsafe { ctx.read_at::<u64>(24)? },
-        data_len: if kind == SYSCALL_IO_MESSAGE {
-            0
-        } else {
-            unsafe { ctx.read_at::<u64>(32)? }
-        },
-        kind,
-        capture_payload: 0,
-        _pad: [0; 6],
-    };
-    let result = if write {
-        HTTP_WRITE_INFLIGHT.insert(&pid_tgid, &inflight, 0)
-    } else {
-        HTTP_READ_INFLIGHT.insert(&pid_tgid, &inflight, 0)
-    };
-    if result.is_err() {
-        increment_risk_tcp_counter(RISK_TCP_EVENT_DROPPED_INDEX);
-    }
-    Ok(())
-}
-
-fn finish_read_syscall(ctx: TracePointContext) -> u32 {
-    match finish_syscall_io(&ctx, false) {
-        Ok(()) => 0,
-        Err(err) => err as u32,
-    }
-}
-
-fn finish_write_syscall(ctx: TracePointContext) -> u32 {
-    match finish_syscall_io(&ctx, true) {
-        Ok(()) => 0,
-        Err(err) => err as u32,
-    }
-}
-
-fn finish_syscall_io(ctx: &TracePointContext, write: bool) -> Result<(), i64> {
-    let pid_tgid = bpf_get_current_pid_tgid();
-    let inflight = if write {
-        unsafe { HTTP_WRITE_INFLIGHT.get(&pid_tgid) }.copied()
-    } else {
-        unsafe { HTTP_READ_INFLIGHT.get(&pid_tgid) }.copied()
-    };
-    if write {
-        let _ = HTTP_WRITE_INFLIGHT.remove(&pid_tgid);
-    } else {
-        let _ = HTTP_READ_INFLIGHT.remove(&pid_tgid);
-    }
-
-    let Some(inflight) = inflight else {
-        return Ok(());
-    };
-    let transferred = unsafe { ctx.read_at::<i64>(16)? };
-    if transferred <= 0 || inflight.socket_key == 0 {
-        return Ok(());
-    }
-    if write && inflight.capture_payload != 0 {
-        capture_response_payload(&inflight, transferred as u64);
-    } else if !write {
-        capture_request_payload(&inflight, transferred as u64);
-    }
-    Ok(())
-}
-
-fn link_read_syscall_socket(socket_key: u64) {
-    let pid_tgid = bpf_get_current_pid_tgid();
-    if let Some(inflight) = HTTP_READ_INFLIGHT.get_ptr_mut(&pid_tgid) {
-        unsafe {
-            (*inflight).socket_key = socket_key;
-        }
-    }
-}
-
-fn link_write_syscall_socket(socket_key: u64, capture_payload: bool) {
-    let pid_tgid = bpf_get_current_pid_tgid();
-    if let Some(inflight) = HTTP_WRITE_INFLIGHT.get_ptr_mut(&pid_tgid) {
-        unsafe {
-            (*inflight).socket_key = socket_key;
-            (*inflight).capture_payload = capture_payload as u8;
-        }
-    }
-}
-
-fn capture_request_payload(inflight: &SyscallIoInflight, transferred: u64) {
-    if let Some(request) = HTTP_REQUEST_HEADS.get_ptr_mut(&inflight.socket_key) {
-        capture_next_payload_chunk(request, inflight, transferred);
-        return;
-    }
-
-    let Some(request) = HTTP_PAYLOAD_BUFFER.get_ptr_mut(0) else {
-        increment_risk_tcp_counter(RISK_TCP_EVENT_DROPPED_INDEX);
-        return;
-    };
-    initialize_http_payload(request, inflight.socket_key, HTTP_PAYLOAD_DIRECTION_REQUEST);
-    capture_syscall_payload(request, inflight, transferred);
-    if unsafe { (*request).first_payload_len } != 0
-        && HTTP_REQUEST_HEADS
-            .insert(&inflight.socket_key, unsafe { &*request }, 0)
-            .is_err()
-    {
-        increment_risk_tcp_counter(RISK_TCP_EVENT_DROPPED_INDEX);
-    }
-}
-
-fn capture_response_payload(inflight: &SyscallIoInflight, transferred: u64) {
-    let Some(response) = HTTP_PAYLOAD_BUFFER.get_ptr_mut(0) else {
-        increment_risk_tcp_counter(RISK_TCP_EVENT_DROPPED_INDEX);
-        return;
-    };
-    initialize_http_payload(
-        response,
-        inflight.socket_key,
-        HTTP_PAYLOAD_DIRECTION_RESPONSE,
-    );
-    capture_syscall_payload(response, inflight, transferred);
-    if unsafe { (*response).first_payload_len } != 0 {
-        output_http_payload(unsafe { &*response });
-    }
-}
-
-fn initialize_http_payload(payload: *mut HttpPayloadEvent, socket_key: u64, direction: u8) {
     unsafe {
-        (*payload).socket_key = socket_key;
-        (*payload).direction = direction;
-        (*payload)._pad = [0; 3];
-        (*payload).first_payload_len = 0;
-        (*payload).second_payload_len = 0;
+        let sock: *const sock = ctx.arg(0).ok_or(1u32)?;
     }
-}
-
-fn capture_syscall_payload(
-    payload: *mut HttpPayloadEvent,
-    inflight: &SyscallIoInflight,
-    transferred: u64,
-) {
-    if inflight.kind == SYSCALL_IO_DIRECT {
-        capture_first_payload_chunks(payload, inflight.data_ptr, inflight.data_len, transferred);
-        return;
-    }
-
-    let (iov_ptr, iov_count) = if inflight.kind == SYSCALL_IO_VECTOR {
-        (inflight.data_ptr, inflight.data_len)
-    } else if inflight.kind == SYSCALL_IO_MESSAGE {
-        match read_user_message_iov(inflight.data_ptr) {
-            Ok(iov) => iov,
-            Err(_) => return,
-        }
-    } else {
-        return;
-    };
-    capture_iovec_payload(payload, iov_ptr, iov_count, transferred);
-}
-
-fn capture_next_payload_chunk(
-    payload: *mut HttpPayloadEvent,
-    inflight: &SyscallIoInflight,
-    transferred: u64,
-) {
-    if unsafe { (*payload).second_payload_len } != 0 {
-        return;
-    }
-    if inflight.kind == SYSCALL_IO_DIRECT {
-        capture_second_payload_chunk(payload, inflight.data_ptr, inflight.data_len, transferred);
-        return;
-    }
-
-    let (iov_ptr, iov_count) = if inflight.kind == SYSCALL_IO_VECTOR {
-        (inflight.data_ptr, inflight.data_len)
-    } else if inflight.kind == SYSCALL_IO_MESSAGE {
-        match read_user_message_iov(inflight.data_ptr) {
-            Ok(iov) => iov,
-            Err(_) => return,
-        }
-    } else {
-        return;
-    };
-    let Ok((base, len)) = read_user_iovec(iov_ptr, 0) else {
-        return;
-    };
-    capture_second_payload_chunk(payload, base, len, transferred);
-    if unsafe { (*payload).second_payload_len } == 0 && iov_count > 1 {
-        let Ok((base, len)) = read_user_iovec(iov_ptr, 1) else {
-            return;
-        };
-        capture_second_payload_chunk(payload, base, len, transferred);
-    }
-}
-
-fn read_user_message_iov(message: u64) -> Result<(u64, u64), i64> {
-    if message == 0 {
-        return Err(1);
-    }
-    let iov = unsafe { bpf_probe_read_user((message + USER_MSGHDR_IOV_OFFSET) as *const u64) }?;
-    let iov_count =
-        unsafe { bpf_probe_read_user((message + USER_MSGHDR_IOVLEN_OFFSET) as *const u64) }?;
-    Ok((iov, iov_count))
-}
-
-fn read_user_iovec(iov: u64, index: u64) -> Result<(u64, u64), i64> {
-    if iov == 0 || index > 1 {
-        return Err(1);
-    }
-    let address = iov + index * USER_IOVEC_SIZE;
-    let base = unsafe { bpf_probe_read_user(address as *const u64) }?;
-    let len = unsafe { bpf_probe_read_user((address + 8) as *const u64) }?;
-    Ok((base, len))
-}
-
-fn capture_iovec_payload(
-    payload: *mut HttpPayloadEvent,
-    iov: u64,
-    iov_count: u64,
-    transferred: u64,
-) {
-    if iov_count == 0 {
-        return;
-    }
-    let Ok((first_base, first_len)) = read_user_iovec(iov, 0) else {
-        return;
-    };
-    let first_transferred = transferred.min(first_len);
-    capture_first_payload_chunks(payload, first_base, first_len, first_transferred);
-    if unsafe { (*payload).second_payload_len } != 0
-        || iov_count < 2
-        || transferred <= first_transferred
-    {
-        return;
-    }
-    let Ok((second_base, second_len)) = read_user_iovec(iov, 1) else {
-        return;
-    };
-    capture_second_payload_chunk(
-        payload,
-        second_base,
-        second_len,
-        transferred - first_transferred,
-    );
-}
-
-fn capture_first_payload_chunks(
-    payload_event: *mut HttpPayloadEvent,
-    user_buffer: u64,
-    buffer_len: u64,
-    payload_len: u64,
-) {
-    let (first_len, second_len) = http_request_capture_lengths(payload_len, buffer_len);
-    if first_len == 0 {
-        return;
-    }
-
-    let destination = unsafe { (*payload_event).first_bytes.as_mut_ptr() };
-    let payload = unsafe { core::slice::from_raw_parts_mut(destination, first_len) };
-    if unsafe { bpf_probe_read_user_buf(user_buffer as *const u8, payload) }.is_ok() {
-        unsafe {
-            (*payload_event).first_payload_len = first_len as u16;
-        }
-    }
-    if second_len == 0 {
-        return;
-    }
-
-    let destination = unsafe { (*payload_event).second_bytes.as_mut_ptr() };
-    let payload = unsafe { core::slice::from_raw_parts_mut(destination, second_len) };
-    let source = user_buffer + HTTP_PAYLOAD_CHUNK_MAX_LEN as u64;
-    if unsafe { bpf_probe_read_user_buf(source as *const u8, payload) }.is_ok() {
-        unsafe {
-            (*payload_event).second_payload_len = second_len as u16;
-        }
-    }
-}
-
-fn capture_second_payload_chunk(
-    payload_event: *mut HttpPayloadEvent,
-    user_buffer: u64,
-    buffer_len: u64,
-    payload_len: u64,
-) {
-    if unsafe { (*payload_event).second_payload_len } != 0 {
-        return;
-    }
-    let copy_len = payload_len
-        .min(buffer_len)
-        .min(HTTP_PAYLOAD_CHUNK_MAX_LEN as u64) as usize;
-    if copy_len == 0 {
-        return;
-    }
-
-    let destination = unsafe { (*payload_event).second_bytes.as_mut_ptr() };
-    let payload = unsafe { core::slice::from_raw_parts_mut(destination, copy_len) };
-    if unsafe { bpf_probe_read_user_buf(user_buffer as *const u8, payload) }.is_ok() {
-        unsafe {
-            (*payload_event).second_payload_len = copy_len as u16;
-        }
-    }
+    Ok(0)
 }
 
 ///
@@ -1241,13 +421,6 @@ pub fn inet_sock_set_state(ctx: TracePointContext) -> u32 {
     }
 }
 
-fn cleanup_socket_request_state(socket_key: u64) {
-    let _ = TCP_REQUEST_START.remove(&socket_key);
-    let _ = TCP_PAYLOAD_ARRIVAL.remove(&socket_key);
-    let _ = TCP_ACTIVE_FLOWS.remove(&socket_key);
-    let _ = HTTP_REQUEST_HEADS.remove(&socket_key);
-}
-
 fn try_inet_sock_set_state(ctx: TracePointContext) -> Result<u32, i64> {
     unsafe {
         // void * 这个其实是sock类型的指针
@@ -1255,9 +428,6 @@ fn try_inet_sock_set_state(ctx: TracePointContext) -> Result<u32, i64> {
         let old_state = ctx.read_at::<u32>(16)?;
         let new_state = ctx.read_at::<u32>(20)?;
 
-        if new_state == BPF_TCP_CLOSE {
-            cleanup_socket_request_state(skaddr);
-        }
         if old_state == BPF_TCP_SYN_SENT && new_state == BPF_TCP_ESTABLISHED {
             if let Some(start_ns) = START.get(&skaddr) {
                 let current_ns = bpf_ktime_get_ns();
@@ -1420,48 +590,78 @@ pub fn tcp_send_reset(ctx: TracePointContext) -> u32 {
 }
 
 fn try_tcp_send_reset(ctx: TracePointContext) -> Result<u32, i64> {
-    count_target_tcp_event(&ctx, RISK_TCP_SEND_RESET_INDEX)
-}
+    let state: i32 = unsafe { ctx.read_at::<i32>(32).map_err(|err| err)? };
+    let sport: u16 = unsafe { ctx.read_at::<u16>(36).map_err(|err| err)? };
+    let dport: u16 = unsafe { ctx.read_at::<u16>(38).map_err(|err| err)? };
+    let family: u16 = unsafe { ctx.read_at::<u16>(40).map_err(|err| err)? };
+    let pid_tgid = bpf_get_current_pid_tgid();
+    let pid = (pid_tgid >> 32) as u32;
+    let tid = pid_tgid as u32;
 
-#[tracepoint]
-pub fn tcp_receive_reset(ctx: TracePointContext) -> u32 {
-    match count_target_tcp_event(&ctx, RISK_TCP_RECEIVE_RESET_INDEX) {
-        Ok(ret) => ret,
-        Err(err) => err as u32,
+    if family == AF_INET {
+        let saddr: [u8; 4] = unsafe { ctx.read_at::<[u8; 4]>(42).map_err(|err| err)? };
+        let daddr: [u8; 4] = unsafe { ctx.read_at::<[u8; 4]>(46).map_err(|err| err)? };
+
+        info!(
+            &ctx,
+            "tcp_send_reset的信息为:pid:{} tid:{} state:{} family:{} source:{}.{}.{}.{}:{} dst:{}.{}.{}.{}:{}",
+            pid,
+            tid,
+            state,
+            family,
+            saddr[0],
+            saddr[1],
+            saddr[2],
+            saddr[3],
+            sport,
+            daddr[0],
+            daddr[1],
+            daddr[2],
+            daddr[3],
+            dport,
+        );
+    } else if family == AF_INET6 {
+        let saddr_v6: [u8; 16] = unsafe { ctx.read_at::<[u8; 16]>(50).map_err(|err| err)? };
+        let daddr_v6: [u8; 16] = unsafe { ctx.read_at::<[u8; 16]>(66).map_err(|err| err)? };
+
+        info!(
+            &ctx,
+            "tcp_send_reset的信息为:pid:{} tid:{} state:{} family:{} source:{:x}:{:x}:{:x}:{:x}:{:x}:{:x}:{:x}:{:x}:{} dst:{:x}:{:x}:{:x}:{:x}:{:x}:{:x}:{:x}:{:x}:{}",
+            pid,
+            tid,
+            state,
+            family,
+            u16::from_be_bytes([saddr_v6[0], saddr_v6[1]]),
+            u16::from_be_bytes([saddr_v6[2], saddr_v6[3]]),
+            u16::from_be_bytes([saddr_v6[4], saddr_v6[5]]),
+            u16::from_be_bytes([saddr_v6[6], saddr_v6[7]]),
+            u16::from_be_bytes([saddr_v6[8], saddr_v6[9]]),
+            u16::from_be_bytes([saddr_v6[10], saddr_v6[11]]),
+            u16::from_be_bytes([saddr_v6[12], saddr_v6[13]]),
+            u16::from_be_bytes([saddr_v6[14], saddr_v6[15]]),
+            sport,
+            u16::from_be_bytes([daddr_v6[0], daddr_v6[1]]),
+            u16::from_be_bytes([daddr_v6[2], daddr_v6[3]]),
+            u16::from_be_bytes([daddr_v6[4], daddr_v6[5]]),
+            u16::from_be_bytes([daddr_v6[6], daddr_v6[7]]),
+            u16::from_be_bytes([daddr_v6[8], daddr_v6[9]]),
+            u16::from_be_bytes([daddr_v6[10], daddr_v6[11]]),
+            u16::from_be_bytes([daddr_v6[12], daddr_v6[13]]),
+            u16::from_be_bytes([daddr_v6[14], daddr_v6[15]]),
+            dport,
+        );
+    } else {
+        info!(
+            &ctx,
+            "tcp_send_reset的信息为:pid:{} tid:{} state:{} family:{} sport:{} dport:{}",
+            pid,
+            tid,
+            state,
+            family,
+            sport,
+            dport,
+        );
     }
-}
 
-#[tracepoint]
-pub fn tcp_retransmit_skb(ctx: TracePointContext) -> u32 {
-    match count_target_tcp_event(&ctx, RISK_TCP_RETRANSMIT_INDEX) {
-        Ok(ret) => ret,
-        Err(err) => err as u32,
-    }
-}
-
-fn count_target_tcp_event(ctx: &TracePointContext, counter_index: u32) -> Result<u32, i64> {
-    const TCP_EVENT_LOCAL_PORT_OFFSET: usize = 36;
-
-    let Some(config) = crate::common::risk_target_config() else {
-        return Ok(0);
-    };
-    let source_port: u16 = unsafe { ctx.read_at(TCP_EVENT_LOCAL_PORT_OFFSET)? };
-    if source_port != config.server_port {
-        return Ok(0);
-    }
-
-    increment_risk_tcp_counter(counter_index);
     Ok(0)
-}
-
-fn increment_risk_tcp_counter(counter_index: u32) {
-    add_risk_tcp_counter(counter_index, 1);
-}
-
-fn add_risk_tcp_counter(counter_index: u32, value: u64) {
-    unsafe {
-        if let Some(counter) = RISK_TCP_COUNTERS.get_ptr_mut(counter_index) {
-            *counter = (*counter).wrapping_add(value);
-        }
-    }
 }

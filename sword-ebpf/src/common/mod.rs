@@ -1,27 +1,4 @@
-use aya_ebpf::{
-    helpers::{bpf_get_current_pid_tgid, generated::bpf_get_current_cgroup_id},
-    macros::map,
-    maps::{Array, HashMap},
-};
-use sword_common::{
-    RISK_TARGET_CONFIG_MAX_ENTRIES, RISK_TARGET_TGIDS_MAX_ENTRIES, RiskTargetConfig,
-};
-
-#[map]
-pub static RISK_TARGET_CONFIG: Array<RiskTargetConfig> =
-    Array::with_max_entries(RISK_TARGET_CONFIG_MAX_ENTRIES, 0);
-
-#[map]
-pub static RISK_TARGET_TGIDS: HashMap<u32, u8> =
-    HashMap::with_max_entries(RISK_TARGET_TGIDS_MAX_ENTRIES, 0);
-
-pub fn risk_target_config() -> Option<&'static RiskTargetConfig> {
-    RISK_TARGET_CONFIG.get(0)
-}
-
-pub fn is_risk_target_tgid(tgid: u32) -> bool {
-    unsafe { RISK_TARGET_TGIDS.get(&tgid).is_some() }
-}
+use aya_ebpf::helpers::{bpf_get_current_pid_tgid, generated::bpf_get_current_cgroup_id};
 
 ///
 /// 增加一些工具性质的东西,可以很方便的获取一些数据或者是信息

@@ -1,4 +1,4 @@
-use std::{mem::size_of, ptr, sync::atomic::AtomicU64};
+use std::sync::atomic::AtomicU64;
 
 use aya::maps::{HashMap, MapData, MapError, PerCpuArray};
 use prometheus_client::{
@@ -6,7 +6,7 @@ use prometheus_client::{
     metrics::{family::Family, gauge::Gauge},
     registry::Registry,
 };
-use sword_common::{SchedSwitchStateKey, SlowSchedEvent, ThreadComm};
+use sword_common::{SchedSwitchStateKey, ThreadComm};
 
 ///
 /// 主要是放置CPU的ebpf采集到的相关的指标信息
@@ -29,9 +29,6 @@ pub struct CpuMetrics {
     sys_enter_open_total: Family<SchedSwitchLabels, Gauge<u64, AtomicU64>>,
     thread_sched_switch_out_total: Family<ThreadStateLabels, Gauge<u64, AtomicU64>>,
     thread_offcpu_ns_total: Family<ThreadStateLabels, Gauge<u64, AtomicU64>>,
-    target_thread_runqueue_total: Gauge<u64, AtomicU64>,
-    target_thread_runqueue_latency_ns_total: Gauge<u64, AtomicU64>,
-    target_thread_runqueue_slow_total: Gauge<u64, AtomicU64>,
 }
 
 impl CpuMetrics {
@@ -41,9 +38,6 @@ impl CpuMetrics {
         let thread_sched_switch_out_total =
             Family::<ThreadStateLabels, Gauge<u64, AtomicU64>>::default();
         let thread_offcpu_ns_total = Family::<ThreadStateLabels, Gauge<u64, AtomicU64>>::default();
-        let target_thread_runqueue_total = Gauge::default();
-        let target_thread_runqueue_latency_ns_total = Gauge::default();
-        let target_thread_runqueue_slow_total = Gauge::default();
         registry.register(
             "sched_switch_total",
             "Total number of sched_switch events per CPU",
@@ -64,29 +58,11 @@ impl CpuMetrics {
             "Total off-CPU time in nanoseconds per tracked thread and switch-out task state",
             thread_offcpu_ns_total.clone(),
         );
-        registry.register(
-            "sword_target_thread_runqueue_total",
-            "Total target thread wakeup-to-running events",
-            target_thread_runqueue_total.clone(),
-        );
-        registry.register(
-            "sword_target_thread_runqueue_latency_ns_total",
-            "Total target thread wakeup-to-running latency in nanoseconds",
-            target_thread_runqueue_latency_ns_total.clone(),
-        );
-        registry.register(
-            "sword_target_thread_runqueue_slow_total",
-            "Total target thread wakeup-to-running events over the configured threshold",
-            target_thread_runqueue_slow_total.clone(),
-        );
         Self {
             sched_switch_total,
             sys_enter_open_total,
             thread_sched_switch_out_total,
             thread_offcpu_ns_total,
-            target_thread_runqueue_total,
-            target_thread_runqueue_latency_ns_total,
-            target_thread_runqueue_slow_total,
         }
     }
 
@@ -119,12 +95,6 @@ impl CpuMetrics {
             .get_or_create(&ThreadStateLabels { tid, comm, state })
             .set(ns);
     }
-
-    fn set_target_runqueue(&self, events: u64, latency_ns: u64, slow: u64) {
-        self.target_thread_runqueue_total.set(events);
-        self.target_thread_runqueue_latency_ns_total.set(latency_ns);
-        self.target_thread_runqueue_slow_total.set(slow);
-    }
 }
 
 ///
@@ -136,7 +106,6 @@ pub struct CpuCollector {
     thread_switch_out: HashMap<MapData, SchedSwitchStateKey, u64>,
     thread_offcpu: HashMap<MapData, SchedSwitchStateKey, u64>,
     thread_comm: HashMap<MapData, u32, ThreadComm>,
-    runqueue_metrics: PerCpuArray<MapData, u64>,
     registry: Registry,
     cpu: CpuMetrics,
 }
@@ -148,7 +117,6 @@ impl CpuCollector {
         thread_switch_out: HashMap<MapData, SchedSwitchStateKey, u64>,
         thread_offcpu: HashMap<MapData, SchedSwitchStateKey, u64>,
         thread_comm: HashMap<MapData, u32, ThreadComm>,
-        runqueue_metrics: PerCpuArray<MapData, u64>,
     ) -> Self {
         let mut registry = Registry::default();
         let cpu = CpuMetrics::new(&mut registry);
@@ -158,7 +126,6 @@ impl CpuCollector {
             thread_switch_out,
             thread_offcpu,
             thread_comm,
-            runqueue_metrics,
             registry: registry,
             cpu: cpu,
         }
@@ -193,11 +160,6 @@ impl CpuCollector {
             self.cpu
                 .set_thread_offcpu_ns_total(key.tid, comm, state, ns);
         }
-        self.cpu.set_target_runqueue(
-            self.per_cpu_total(0)?,
-            self.per_cpu_total(1)?,
-            self.per_cpu_total(2)?,
-        );
         Ok(())
     }
 
@@ -214,42 +176,6 @@ impl CpuCollector {
             .map(|comm| thread_comm_label(&comm))
             .unwrap_or_default()
     }
-
-    fn per_cpu_total(&self, index: u32) -> Result<u64, MapError> {
-        Ok(self.runqueue_metrics.get(&index, 0)?.iter().copied().sum())
-    }
-}
-
-pub(crate) fn decode_slow_sched_event(bytes: &[u8]) -> Option<SlowSchedEvent> {
-    if bytes.len() != size_of::<SlowSchedEvent>() {
-        return None;
-    }
-    Some(unsafe { ptr::read_unaligned(bytes.as_ptr().cast::<SlowSchedEvent>()) })
-}
-
-pub(crate) fn format_slow_sched_event(event: &SlowSchedEvent) -> String {
-    let comm_len = event
-        .comm
-        .iter()
-        .position(|byte| *byte == 0)
-        .unwrap_or(event.comm.len());
-    let comm = String::from_utf8_lossy(&event.comm[..comm_len]);
-    let thread_role = if comm.starts_with("XNIO-1 I/O-") {
-        "xnio-io"
-    } else if comm.starts_with("XNIO-1 task-") {
-        "xnio-worker"
-    } else {
-        "other"
-    };
-    format!(
-        "target thread runqueue slow tid={} comm={} thread_role={} wakeup_ns={} switch_in_ns={} latency_ms={:.3}",
-        event.tid,
-        comm,
-        thread_role,
-        event.wakeup_ns,
-        event.switch_in_ns,
-        event.latency_ns as f64 / 1_000_000.0
-    )
 }
 
 fn thread_comm_label(thread_comm: &ThreadComm) -> String {
@@ -278,58 +204,5 @@ fn sched_switch_state_label(state: u64) -> String {
         2048 => "TASK_NEW".to_string(),
         4096 => "TASK_RTLOCK_WAIT".to_string(),
         _ => format!("0x{state:x}"),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use std::{mem::size_of, slice};
-
-    use prometheus_client::{encoding::text::encode, registry::Registry};
-    use sword_common::SlowSchedEvent;
-
-    use super::{CpuMetrics, decode_slow_sched_event, format_slow_sched_event};
-
-    #[test]
-    fn exports_target_runqueue_metrics_without_thread_labels() {
-        let mut registry = Registry::default();
-        let metrics = CpuMetrics::new(&mut registry);
-        metrics.set_target_runqueue(7, 123_000_000, 2);
-
-        let mut output = String::new();
-        encode(&mut output, &registry).unwrap();
-
-        assert!(output.contains("sword_target_thread_runqueue_total 7"));
-        assert!(output.contains("sword_target_thread_runqueue_latency_ns_total 123000000"));
-        assert!(output.contains("sword_target_thread_runqueue_slow_total 2"));
-    }
-
-    #[test]
-    fn decodes_and_formats_slow_sched_event() {
-        let mut comm = [0; 16];
-        comm[..12].copy_from_slice(b"XNIO-1 I/O-3");
-        let event = SlowSchedEvent {
-            wakeup_ns: 1_000_000,
-            switch_in_ns: 151_000_000,
-            latency_ns: 150_000_000,
-            tid: 3_770_977,
-            comm,
-            _pad: 0,
-        };
-        let bytes = unsafe {
-            slice::from_raw_parts(
-                (&event as *const SlowSchedEvent).cast::<u8>(),
-                size_of::<SlowSchedEvent>(),
-            )
-        };
-
-        let decoded = decode_slow_sched_event(bytes).expect("valid slow sched event");
-
-        assert_eq!(decoded, event);
-        assert_eq!(
-            format_slow_sched_event(&decoded),
-            "target thread runqueue slow tid=3770977 comm=XNIO-1 I/O-3 thread_role=xnio-io \
-wakeup_ns=1000000 switch_in_ns=151000000 latency_ms=150.000"
-        );
     }
 }
