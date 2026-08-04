@@ -18,7 +18,7 @@ pub fn load_network_kprobe(ebpf: &mut aya::Ebpf, options: &LoadOptions) -> anyho
     ];
     if let Some(pid) = options.first_target_pid() {
         info!("监听到我们的进程:{pid}");
-        configure_tcp_sendmsg_target(ebpf, pid)?;
+        configure_target_pid(ebpf, pid)?;
         for ele in kprobe_configs {
             ele.load_kprobe(ebpf)?;
         }
@@ -26,8 +26,8 @@ pub fn load_network_kprobe(ebpf: &mut aya::Ebpf, options: &LoadOptions) -> anyho
     Ok(())
 }
 
-fn configure_tcp_sendmsg_target(ebpf: &mut aya::Ebpf, pid: u32) -> anyhow::Result<()> {
-    let target = tcp_sendmsg_target(pid);
+fn configure_target_pid(ebpf: &mut aya::Ebpf, pid: u32) -> anyhow::Result<()> {
+    let target = target_pid(pid);
     let map = ebpf
         .map_mut(TARGET_PID)
         .ok_or_else(|| anyhow::anyhow!("map {TARGET_PID} not found"))?;
@@ -38,7 +38,7 @@ fn configure_tcp_sendmsg_target(ebpf: &mut aya::Ebpf, pid: u32) -> anyhow::Resul
     Ok(())
 }
 
-fn tcp_sendmsg_target(pid: u32) -> TargetPid {
+fn target_pid(pid: u32) -> TargetPid {
     TargetPid { pid, _pad: 0 }
 }
 

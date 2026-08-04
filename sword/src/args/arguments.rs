@@ -26,15 +26,12 @@ impl LoadOptions {
             .into_iter()
             .filter_map(Result::ok)
             .filter(|ele| !ele.file_type().is_dir())
-            .map(|ele| {
+            .filter_map(|ele| {
                 ele.file_name()
                     .to_str()
                     .and_then(|name| name.parse::<u32>().ok())
             })
-            .filter(|ele| ele.is_some())
-            .map(|ele| self.cmdline_contains(ele.unwrap()))
-            .filter(|ele| ele.is_some())
-            .map(|ele| ele.unwrap())
+            .filter_map(|ele| self.cmdline_contains(ele))
             .collect::<Vec<u32>>();
     }
 
